@@ -1,0 +1,7 @@
+
+
+#Ignore cursor AI rules
+.cursor/rules/codacy.mdc
+node_modules
+dist
+coverage
