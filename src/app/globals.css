@@ -156,7 +156,10 @@ html, body {
 
 .place-bottom {
   position: fixed;
-  bottom: 40px; left: 50%;
+  /* Nudged up from 40px so the pill/button feels like it floats off the
+   * bottom edge rather than sitting against it — matches the 40px side
+   * margins used by .info-left/.info-right vertically as well. */
+  bottom: 52px; left: 50%;
   transform: translateX(-50%);
   display: flex; align-items: center; gap: 20px;
   z-index: 20;
@@ -264,9 +267,9 @@ html, body {
      * sized off the smaller of width and available height (leaving room
      * for the headline band above and the data + pill below) so it
      * never overlaps the text on any reasonable phone. */
-    top: 42%;
-    width: min(520px, 86vw, calc(100dvh - 340px));
-    height: min(520px, 86vw, calc(100dvh - 340px));
+    top: 41%;
+    width: min(520px, 86vw, calc(100dvh - 360px));
+    height: min(520px, 86vw, calc(100dvh - 360px));
   }
 
   .scene {
@@ -291,8 +294,10 @@ html, body {
   }
 
   .info-right {
-    /* Sits between the orrery and the place-pill at the bottom. */
-    bottom: 112px;
+    /* Sits between the orrery and the place-pill at the bottom. The
+     * bottom offset keeps this row clear of the raised place-pill while
+     * staying tight enough that it reads as a single visual group. */
+    bottom: 128px;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -341,7 +346,9 @@ html, body {
   .score-ring-label { font-size: 8px; }
 
   .place-bottom {
-    bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+    /* Lift off the bottom edge so the pill/button reads as floating and
+     * isn't crushed against the browser chrome or home indicator. */
+    bottom: calc(max(env(safe-area-inset-bottom, 0px), 14px) + 28px);
     width: min(560px, 94vw);
     flex-direction: row;
     gap: 10px;
@@ -384,7 +391,7 @@ html, body {
   .place-pill-sep,
   .place-pill-detail { display: none; }
 
-  .info-right { gap: 14px; bottom: 104px; }
+  .info-right { gap: 14px; bottom: 120px; }
   .dir-value { font-size: 20px; }
   .score-ring { width: 56px; height: 56px; }
   .score-ring svg { width: 56px; height: 56px; }

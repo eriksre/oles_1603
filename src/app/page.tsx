@@ -4,11 +4,38 @@ import { useEffect } from 'react';
 import * as THREE from 'three';
 
 interface Star {
-  x: number; y: number; r: number; phase: number;
+  x: number;
+  y: number;
+  r: number;           // core radius (CSS px)
+  baseA: number;       // baseline alpha
+  twinkleAmp: number;  // twinkle amplitude (0 = still)
+  freq1: number;       // primary twinkle frequency
+  freq2: number;       // secondary (adds irregularity)
+  phase: number;
+  color: string;       // "r,g,b" triple
+  glowR: number;       // soft halo radius; 0 = none
+  spike: number;       // diffraction spike length; 0 = none
 }
 interface Nebula {
   x: number; y: number; rx: number; ry: number; c: string;
 }
+
+// Curated stellar color palette, skewed toward warm/neutral (our warm text
+// palette) with a handful of cool blue-white sprinkled in. Real stars span
+// a much wider gamut, but a tight curated set reads as intentional rather
+// than noisy.
+const STAR_COLORS = [
+  '255,245,220', // neutral
+  '255,240,210',
+  '255,235,180', // warm (matches the UI accent)
+  '255,230,170',
+  '255,220,140', // amber giant
+  '255,205,120',
+  '255,180,120', // orange K-type
+  '220,225,255', // cool blue-white
+  '200,215,255',
+  '255,255,245', // near-white
+];
 
 interface PlanetDef {
   name: string;
@@ -58,17 +85,92 @@ export default function OrreryPage() {
       // Reset any previous transform, then scale so 1 drawing unit = 1 CSS px.
       bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Scale star count with viewport area so mobile isn't too sparse and
-      // huge displays aren't too dense. ~1 star per 7000 px² of viewport.
-      const starCount = Math.round(
-        Math.min(700, Math.max(200, (bgW * bgH) / 7000)),
-      );
-      stars = Array.from({ length: starCount }, () => ({
-        x: Math.random() * bgW,
-        y: Math.random() * bgH,
-        r: 0.3 + Math.random() * 1.3,
-        phase: Math.random() * Math.PI * 2,
-      }));
+      // Three layers of stars so the sky reads with depth rather than as a
+      // uniform field of pulsing dots:
+      //   dust    — tiny, very dim, practically still. The visual "grain".
+      //   mid     — main star count, slow irregular twinkle.
+      //   hero    — rare bright standouts with a soft halo and very rare
+      //             diffraction spikes. Drives the eye.
+      //
+      // Counts scale with viewport area so phones don't feel empty and huge
+      // displays don't feel noisy.
+      const area = bgW * bgH;
+      const dustCount = Math.round(Math.min(1200, Math.max(400, area / 3500)));
+      const midCount  = Math.round(Math.min(600,  Math.max(180, area / 7000)));
+      const heroCount = Math.round(Math.min(40,   Math.max(12,  area / 90000)));
+
+      const rand = () => Math.random();
+      // Power-law size: most stars small, a few noticeably larger. The
+      // exponent controls the skew; higher = more small stars.
+      const powSize = (min: number, max: number, skew = 2.5) =>
+        min + (max - min) * Math.pow(rand(), skew);
+
+      const pickColor = (warmBias: number) =>
+        STAR_COLORS[
+          Math.min(
+            STAR_COLORS.length - 1,
+            Math.floor(Math.pow(rand(), warmBias) * STAR_COLORS.length),
+          )
+        ];
+
+      stars = [];
+
+      for (let i = 0; i < dustCount; i++) {
+        stars.push({
+          x: rand() * bgW,
+          y: rand() * bgH,
+          r: 0.35 + rand() * 0.45,
+          baseA: 0.18 + rand() * 0.22,
+          twinkleAmp: rand() * 0.08, // barely breathes
+          freq1: 0.2 + rand() * 0.4,
+          freq2: 0.15 + rand() * 0.3,
+          phase: rand() * Math.PI * 2,
+          color: pickColor(1.2),
+          glowR: 0,
+          spike: 0,
+        });
+      }
+
+      for (let i = 0; i < midCount; i++) {
+        // Prefer warm stars (bias toward start of palette) — matches the
+        // rest of the UI's warm accent temperature.
+        const r = powSize(0.55, 1.6, 2.2);
+        stars.push({
+          x: rand() * bgW,
+          y: rand() * bgH,
+          r,
+          baseA: 0.35 + rand() * 0.35,
+          twinkleAmp: 0.12 + rand() * 0.28,
+          // Each star picks its own primary/secondary twinkle frequencies
+          // from a non-commensurate range — the beats between them break
+          // the "everything breathing in sync" look of a single sine.
+          freq1: 0.35 + rand() * 1.8,
+          freq2: 0.25 + rand() * 1.1,
+          phase: rand() * Math.PI * 2,
+          color: pickColor(1.4),
+          glowR: r * (1.5 + rand() * 1.5),
+          spike: 0,
+        });
+      }
+
+      for (let i = 0; i < heroCount; i++) {
+        const r = 1.4 + rand() * 1.3;
+        stars.push({
+          x: rand() * bgW,
+          y: rand() * bgH,
+          r,
+          baseA: 0.65 + rand() * 0.3,
+          twinkleAmp: 0.18 + rand() * 0.3,
+          freq1: 0.25 + rand() * 1.0,
+          freq2: 0.2 + rand() * 0.8,
+          phase: rand() * Math.PI * 2,
+          color: pickColor(0.9),      // broader color spread for heroes
+          glowR: r * (4 + rand() * 3),
+          // Only ~35% of heroes get diffraction spikes — otherwise the
+          // field feels too "lens-flare-y".
+          spike: rand() < 0.35 ? r * (5 + rand() * 5) : 0,
+        });
+      }
 
       nebulae = [
         { x: bgW * 0.22, y: bgH * 0.28, rx: 380, ry: 240, c: 'rgba(80,20,130,0.07)' },
@@ -78,7 +180,10 @@ export default function OrreryPage() {
     }
 
     function drawBg(ts: number) {
+      const t = ts * 0.001;
       bgCtx.clearRect(0, 0, bgW, bgH);
+
+      // Nebulae first (underneath everything).
       nebulae.forEach(n => {
         const mx = Math.max(n.rx, n.ry);
         const g = bgCtx.createRadialGradient(n.x, n.y, 0, n.x, n.y, mx);
@@ -93,13 +198,50 @@ export default function OrreryPage() {
         bgCtx.fill();
         bgCtx.restore();
       });
+
+      // Stars — additive so overlapping glows brighten rather than occlude.
+      bgCtx.save();
+      bgCtx.globalCompositeOperation = 'lighter';
       stars.forEach(s => {
-        const o = 0.22 + 0.58 * Math.sin(ts * 0.00065 + s.phase);
+        // Two non-harmonic sines summed give a twinkle that never quite
+        // repeats; clamp keeps it always bright-ish (stars don't fully
+        // "turn off" in real life).
+        const tw = 0.6 * Math.sin(t * s.freq1 + s.phase)
+                 + 0.4 * Math.sin(t * s.freq2 + s.phase * 1.7);
+        const a = Math.max(0.05, s.baseA + s.twinkleAmp * tw);
+
+        // Optional soft halo for mid/hero stars.
+        if (s.glowR > 0) {
+          const haloA = Math.min(0.35, a * 0.35);
+          const hg = bgCtx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.glowR);
+          hg.addColorStop(0, `rgba(${s.color},${haloA})`);
+          hg.addColorStop(1, `rgba(${s.color},0)`);
+          bgCtx.fillStyle = hg;
+          bgCtx.beginPath();
+          bgCtx.arc(s.x, s.y, s.glowR, 0, Math.PI * 2);
+          bgCtx.fill();
+        }
+
+        // Diffraction spikes on a small subset of hero stars.
+        if (s.spike > 0) {
+          const sa = Math.min(0.45, a * 0.55);
+          bgCtx.strokeStyle = `rgba(${s.color},${sa})`;
+          bgCtx.lineWidth = 0.6;
+          bgCtx.beginPath();
+          bgCtx.moveTo(s.x - s.spike, s.y);
+          bgCtx.lineTo(s.x + s.spike, s.y);
+          bgCtx.moveTo(s.x, s.y - s.spike);
+          bgCtx.lineTo(s.x, s.y + s.spike);
+          bgCtx.stroke();
+        }
+
+        // Core.
         bgCtx.beginPath();
         bgCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        bgCtx.fillStyle = `rgba(255,235,180,${o})`;
+        bgCtx.fillStyle = `rgba(${s.color},${a})`;
         bgCtx.fill();
       });
+      bgCtx.restore();
     }
 
     // ─── Three.js orrery ──────────────────────────────────────────────────────
@@ -179,9 +321,14 @@ export default function OrreryPage() {
 
     // ─── Sun ──────────────────────────────────────────────────────────────────
     const SUN_RADIUS = 40;
-    const sunTex = loadTex('/textures/2k_sun.jpg');
+    // User explicitly asked for the 8k sun. Note: Solar System Scope labels
+    // their highest-res sun as "8k" but it's actually 4096×2048. It's still
+    // 4× the area of the previous 2k map so surface granulation reads
+    // clearly on retina displays.
+    const sunTex = loadTex('/textures/8k_sun.jpg');
     const sunMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(SUN_RADIUS, 96, 96),
+      // Higher tessellation so the silhouette stays round on hi-DPI phones.
+      new THREE.SphereGeometry(SUN_RADIUS, 128, 128),
       new THREE.MeshBasicMaterial({ map: sunTex }),
     );
     scene.add(sunMesh);
@@ -215,15 +362,26 @@ export default function OrreryPage() {
       [0.4, 'rgba(255,120,30,0.16)'],
       [1.0, 'rgba(255,80,0,0.0)'],
     ]);
+    // An extra cooler, softer outer bloom that layers under the warm halo
+    // and breathes at its own slow cadence. Gives the glow a dual-tone
+    // warm-core / cool-outer feel closer to real solar photographs.
+    const bloomTex = makeGlowTexture([
+      [0.0, 'rgba(255,200,120,0.22)'],
+      [0.35, 'rgba(255,140,80,0.09)'],
+      [0.75, 'rgba(255,110,60,0.03)'],
+      [1.0,  'rgba(180,100,60,0.0)'],
+    ]);
 
     // Corona — tight inner glow parented to the Sun. Small enough that it
     // never reaches any planet's orbit (Mercury is at 75), so normal depth
     // testing never causes it to overlap a planet.
+    const CORONA_BASE = 104;
     const corona = new THREE.Sprite(new THREE.SpriteMaterial({
       map: coronaTex, transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,
+      opacity: 1.0,
     }));
-    corona.scale.set(100, 100, 1);
+    corona.scale.set(CORONA_BASE, CORONA_BASE, 1);
     sunMesh.add(corona);
 
     // Outer halo — the big dramatic radiance. If we centered this on the Sun
@@ -237,11 +395,13 @@ export default function OrreryPage() {
     // depth test now reliably hides it behind any opaque surface (planets
     // and the Sun itself) and only reveals it in empty space — giving us
     // the big glow back without any strobing.
+    const HALO_BASE = 460;
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: haloTex, transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,
+      opacity: 1.0,
     }));
-    halo.scale.set(440, 440, 1);
+    halo.scale.set(HALO_BASE, HALO_BASE, 1);
     const HALO_DEPTH_OFFSET = 700; // camera near=0.1 / far=4000; Neptune max depth ~1430
     const haloBackwardOffset = camera.position
       .clone()
@@ -250,6 +410,23 @@ export default function OrreryPage() {
       .multiplyScalar(HALO_DEPTH_OFFSET);
     halo.position.copy(haloBackwardOffset);
     scene.add(halo);
+
+    // Outer bloom sits slightly further behind — it's the very soft wash
+    // that fades into the space around the Sun.
+    const BLOOM_BASE = 720;
+    const bloom = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: bloomTex, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      opacity: 0.9,
+    }));
+    bloom.scale.set(BLOOM_BASE, BLOOM_BASE, 1);
+    const bloomBackwardOffset = camera.position
+      .clone()
+      .negate()
+      .normalize()
+      .multiplyScalar(HALO_DEPTH_OFFSET + 60);
+    bloom.position.copy(bloomBackwardOffset);
+    scene.add(bloom);
 
     // Invisible hit sphere for Sun hover
     const sunHit = new THREE.Mesh(
@@ -262,32 +439,32 @@ export default function OrreryPage() {
     // ─── Planets ──────────────────────────────────────────────────────────────
     const PLANETS: PlanetDef[] = [
       { name: 'Mercury', info: '88 day orbit · Closest to the Sun',
-        texture: '/textures/2k_mercury.jpg',
+        texture: '/textures/4k_mercury.jpg',
         size: 4, orbitR: 75, period: 5.1, offset: 0.8,
         tilt: THREE.MathUtils.degToRad(0.03), spin: 0.08 },
 
       { name: 'Venus', info: '225 day orbit · Hottest planet',
-        texture: '/textures/2k_venus_atmosphere.jpg',
+        texture: '/textures/4k_venus_surface.jpg',
         size: 7, orbitR: 115, period: 12.9, offset: 2.1,
         tilt: THREE.MathUtils.degToRad(177), spin: -0.03 },
 
       { name: 'Earth', info: '365 day orbit · Our home',
-        texture: '/textures/2k_earth_daymap.jpg',
+        texture: '/textures/4k_earth_daymap.jpg',
         size: 9, orbitR: 160, period: 21.0, offset: 4.5,
         tilt: THREE.MathUtils.degToRad(23.4), spin: 0.14 },
 
       { name: 'Mars', info: '687 day orbit · The red planet',
-        texture: '/textures/2k_mars.jpg',
+        texture: '/textures/4k_mars.jpg',
         size: 6, orbitR: 210, period: 39.5, offset: 1.2,
         tilt: THREE.MathUtils.degToRad(25.2), spin: 0.18 },
 
       { name: 'Jupiter', info: '12 year orbit · Largest planet',
-        texture: '/textures/2k_jupiter.jpg',
+        texture: '/textures/4k_jupiter.jpg',
         size: 22, orbitR: 285, period: 125, offset: 3.7,
         tilt: THREE.MathUtils.degToRad(3.1), spin: 0.90 },
 
       { name: 'Saturn', info: '29 year orbit · Lord of the rings',
-        texture: '/textures/2k_saturn.jpg',
+        texture: '/textures/4k_saturn.jpg',
         size: 18, orbitR: 350, period: 312, offset: 0.4,
         tilt: THREE.MathUtils.degToRad(26.7), spin: 0.82,
         hasRings: true },
@@ -363,7 +540,7 @@ export default function OrreryPage() {
           const u = (r - innerR) / (outerR - innerR);
           uv.setXY(i, u, 0.5);
         }
-        const ringTex = loadTex('/textures/2k_saturn_ring_alpha.png');
+        const ringTex = loadTex('/textures/8k_saturn_ring_alpha.png');
         const ringMat = new THREE.MeshBasicMaterial({
           map: ringTex,
           transparent: true,
@@ -406,7 +583,7 @@ export default function OrreryPage() {
     const moonOrbitGroup = new THREE.Group();
     const moonTiltGroup  = new THREE.Group();
     moonTiltGroup.rotation.z = THREE.MathUtils.degToRad(6.7);
-    const moonTex = loadTex('/textures/2k_moon.jpg');
+    const moonTex = loadTex('/textures/4k_moon.jpg');
     const moonMat = new THREE.MeshStandardMaterial({
       map: moonTex,
       roughness: 1,
@@ -528,11 +705,40 @@ export default function OrreryPage() {
 
       drawBg(ts);
 
-      // Sun rotation & glow pulse
+      // Sun rotation & glow pulse — replaced the old single-sine pulse with
+      // three non-commensurate sines per layer so the result never quite
+      // repeats and reads as organic "breathing" rather than a metronome.
+      // Each layer uses its own seed phase + slightly different frequency
+      // set so corona / halo / bloom don't stay in phase with each other.
       sunMesh.rotation.y += dt * 0.05;
-      const pulse = 0.5 + 0.5 * Math.sin(t * 1.5);
-      corona.scale.setScalar(100 + pulse * 8);
-      halo.scale.setScalar(440 + pulse * 40);
+
+      // Corona: fastest-moving, tightest amplitude. Sits right at the
+      // limb of the sun and tracks the "shimmer" of surface activity.
+      const coronaPulse =
+          0.55 * Math.sin(t * 0.42 + 1.3)
+        + 0.30 * Math.sin(t * 0.97 + 2.4)
+        + 0.15 * Math.sin(t * 1.83 + 0.7);
+      corona.scale.setScalar(CORONA_BASE + coronaPulse * 6);
+      corona.material.opacity = 0.92 + coronaPulse * 0.05;
+
+      // Halo: medium cadence, slightly larger amplitude, offset phase so
+      // it doesn't expand/contract in lockstep with the corona.
+      const haloPulse =
+          0.50 * Math.sin(t * 0.27 + 0.4)
+        + 0.30 * Math.sin(t * 0.61 + 3.1)
+        + 0.20 * Math.sin(t * 1.11 + 5.2);
+      halo.scale.setScalar(HALO_BASE + haloPulse * 26);
+      halo.material.opacity = 0.95 + haloPulse * 0.04;
+
+      // Outer bloom: slowest, broadest — the "atmosphere" of the glow. Its
+      // amplitude is larger in absolute terms but proportionally small
+      // (~3% of its base scale) so it stays subtle.
+      const bloomPulse =
+          0.55 * Math.sin(t * 0.13 + 2.7)
+        + 0.30 * Math.sin(t * 0.33 + 0.9)
+        + 0.15 * Math.sin(t * 0.71 + 4.1);
+      bloom.scale.setScalar(BLOOM_BASE + bloomPulse * 34);
+      bloom.material.opacity = 0.85 + bloomPulse * 0.08;
 
       // Update planet positions, rotation, and shader uniforms.
       bodies.forEach(b => {
