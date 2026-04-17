@@ -179,12 +179,9 @@ export default function OrreryPage() {
       [1.0, 'rgba(255,80,0,0.0)'],
     ]);
 
-    // IMPORTANT: sprite radii must stay inside Mercury's orbit (75). The
-    // sprites are additive-blended transparents, and default depth testing
-    // causes them to selectively tint planets that pass behind the Sun —
-    // which reads as the inner planets strobing once per half-orbit. Keeping
-    // corona max radius <= ~55 and halo max radius <= ~70 eliminates any
-    // overlap with Mercury / Venus / Earth while preserving the sun's glow.
+    // Corona — tight inner glow parented to the Sun. Small enough that it
+    // never reaches any planet's orbit (Mercury is at 75), so normal depth
+    // testing never causes it to overlap a planet.
     const corona = new THREE.Sprite(new THREE.SpriteMaterial({
       map: coronaTex, transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -192,12 +189,30 @@ export default function OrreryPage() {
     corona.scale.set(100, 100, 1);
     sunMesh.add(corona);
 
+    // Outer halo — the big dramatic radiance. If we centered this on the Sun
+    // at z=0, inner planets (Mercury/Venus/Earth) would orbit inside its
+    // screen footprint while also crossing the Sun's depth plane, and the
+    // depth test would flip the halo on/off over each planet twice per orbit
+    // (the strobe the user was seeing). Instead we push the sprite ~700
+    // units along the camera's view direction so its depth sits *behind*
+    // every planet's orbit. With ortho projection this does not change its
+    // screen position; the sprite still appears centered on the Sun, but the
+    // depth test now reliably hides it behind any opaque surface (planets
+    // and the Sun itself) and only reveals it in empty space — giving us
+    // the big glow back without any strobing.
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: haloTex, transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,
     }));
-    halo.scale.set(130, 130, 1);
-    sunMesh.add(halo);
+    halo.scale.set(440, 440, 1);
+    const HALO_DEPTH_OFFSET = 700; // camera near=0.1 / far=4000; Neptune max depth ~1430
+    const haloBackwardOffset = camera.position
+      .clone()
+      .negate()
+      .normalize()
+      .multiplyScalar(HALO_DEPTH_OFFSET);
+    halo.position.copy(haloBackwardOffset);
+    scene.add(halo);
 
     // Invisible hit sphere for Sun hover
     const sunHit = new THREE.Mesh(
@@ -479,8 +494,8 @@ export default function OrreryPage() {
       // Sun rotation & glow pulse
       sunMesh.rotation.y += dt * 0.05;
       const pulse = 0.5 + 0.5 * Math.sin(t * 1.5);
-      corona.scale.setScalar(100 + pulse * 6);
-      halo.scale.setScalar(130 + pulse * 8);
+      corona.scale.setScalar(100 + pulse * 8);
+      halo.scale.setScalar(440 + pulse * 40);
 
       // Update planet positions, rotation, and shader uniforms.
       bodies.forEach(b => {

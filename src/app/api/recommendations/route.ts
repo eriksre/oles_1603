@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { EventsApi } from "../../../api/events-api.js";
 import { CompositeEventSource } from "../../../engine/composite-event-source.js";
+import { AuroraEventSource } from "../../../engine/aurora-event-source.js";
+import { IssPassEventSource } from "../../../engine/iss-pass-event-source.js";
 import { MeteorShowerEventSource } from "../../../engine/meteor-shower-event-source.js";
 import { OpenRouterAstronomyAdvisor } from "../../../llm/openrouter-astronomy-advisor.js";
 import { LocalAstronomyEventSource } from "../../../providers/astronomy/localAstronomyEventSource.js";
@@ -185,10 +187,15 @@ const buildEventsApi = () => {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
 
   return new EventsApi({
-    eventSource: new CompositeEventSource([
-      new LocalAstronomyEventSource(),
-      new MeteorShowerEventSource()
-    ]),
+    eventSource: new CompositeEventSource(
+      [
+        new LocalAstronomyEventSource(),
+        new MeteorShowerEventSource(),
+        new AuroraEventSource(),
+        new IssPassEventSource()
+      ],
+      { continueOnSourceError: true }
+    ),
     weatherProvider: new OpenMeteoWeatherProvider({
       baseUrl: process.env.OPEN_METEO_BASE_URL
     }),

@@ -114,6 +114,8 @@ Current commands:
 - `npm run events:all -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093`
 - `npm run events:local -- --date 2024-12-01 --days 15 --lat -33.8688 --lon 151.2093 --types planet_opposition`
 - `npm run events:meteor -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093`
+- `npm run events:aurora -- --date 2026-04-17 --days 1 --lat 64.1466 --lon -21.9426`
+- `npm run events:iss -- --date 2026-04-17 --days 3 --lat -33.8688 --lon 151.2093`
 
 When new sources are implemented, add one source-specific command and include that source in `events:all`.
 
@@ -200,6 +202,7 @@ Implementation notes:
 - Treat aurora as a live/short-range source, not a long calendar source.
 - Use NOAA as the visibility source of truth.
 - Use DONKI for event explanation/context only after a local aurora opportunity exists or a watch threshold is met.
+- Implemented with the NOAA SWPC OVATION latest JSON grid. The adapter emits a local event only when the forecast time is inside the requested range, the observer sky is dark enough, and a local/nearby aurora grid value clears the configured threshold.
 
 ### 4. ISS Orbital Elements / Ephemeris Files
 
@@ -222,6 +225,7 @@ Implementation notes:
 
 - Add a maintained SGP4 library for CelesTrak TLE/OMM data.
 - A pass is a user event only if the satellite is above the horizon, sunlit, and the observer sky is dark enough.
+- Implemented with CelesTrak GP OMM JSON for NORAD 25544 and `satellite.js` SGP4 propagation. The adapter limits predictions to a short window around the current OMM epoch and emits only visible, sunlit passes.
 
 ### 5. Reference / Validation Material
 

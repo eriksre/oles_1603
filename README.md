@@ -6,10 +6,11 @@ Local app commands:
 - `npm run build` creates a production Next.js build.
 - `npm start` serves the production build after `npm run build`.
 - `npm test` runs the Vitest backend/domain tests.
-- `npm run build:lib` emits the TypeScript library output into `dist/`.
 - `npm run events:all -- --date 2025-03-01 --days 31 --lat -33.8688 --lon 151.2093` queries all implemented raw event sources.
 - `npm run events:local -- --date 2025-03-01 --days 31 --lat -33.8688 --lon 151.2093` queries locally-derived ephemeris events.
 - `npm run events:meteor -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093` queries curated meteor-shower events.
+- `npm run events:aurora -- --date 2026-04-17 --days 1 --lat 64.1466 --lon -21.9426` queries NOAA SWPC aurora opportunities.
+- `npm run events:iss -- --date 2026-04-17 --days 3 --lat -33.8688 --lon 151.2093` queries visible ISS passes.
 
 Planning document:
 

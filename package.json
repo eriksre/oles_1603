@@ -11,6 +11,8 @@
     "events:all": "tsx scripts/query-events.ts --source all",
     "events:local": "tsx scripts/query-events.ts --source local",
     "events:meteor": "tsx scripts/query-events.ts --source meteor",
+    "events:aurora": "tsx scripts/query-events.ts --source aurora",
+    "events:iss": "tsx scripts/query-events.ts --source iss",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

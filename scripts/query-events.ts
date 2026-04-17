@@ -1,11 +1,13 @@
 import { CompositeEventSource } from "../src/engine/composite-event-source.ts";
+import { AuroraEventSource } from "../src/engine/aurora-event-source.ts";
+import { IssPassEventSource } from "../src/engine/iss-pass-event-source.ts";
 import { MeteorShowerEventSource } from "../src/engine/meteor-shower-event-source.ts";
 import type { AstronomyEventSource } from "../src/engine/contracts.ts";
 import type { AstronomyEventCandidate, EventType } from "../src/domain/events.ts";
 import { EVENT_TYPES } from "../src/domain/events.ts";
 import { LocalAstronomyEventSource } from "../src/providers/astronomy/localAstronomyEventSource.ts";
 
-const SOURCE_TYPES = ["all", "local", "meteor"] as const;
+const SOURCE_TYPES = ["all", "local", "meteor", "aurora", "iss"] as const;
 
 type QuerySource = (typeof SOURCE_TYPES)[number];
 
@@ -33,9 +35,12 @@ Usage:
   npm run events:all -- --date 2025-03-01 --days 31 --lat -33.8688 --lon 151.2093 --place "Sydney"
   npm run events:local -- --date 2024-12-01 --days 15 --lat -33.8688 --lon 151.2093 --types planet_opposition
   npm run events:meteor -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093
+  npm run events:aurora -- --date 2026-04-17 --days 1 --lat 64.1466 --lon -21.9426 --place "Reykjavik"
+  npm run events:iss -- --date 2026-04-17 --days 3 --lat -33.8688 --lon 151.2093 --place "Sydney"
 
 Options:
-  --source all|local|meteor Source to query. Package scripts set this automatically.
+  --source all|local|meteor|aurora|iss
+                           Source to query. Package scripts set this automatically.
   --date YYYY-MM-DD|ISO    Start date/time. Date-only values start at 00:00 UTC.
   --end YYYY-MM-DD|ISO     End date/time. Date-only values end at 23:59:59.999 UTC.
   --days N                 Number of days from --date when --end is omitted. Default: 14.
@@ -237,11 +242,20 @@ function buildEventSource(options: CliOptions): AstronomyEventSource {
       return buildLocalSource(options);
     case "meteor":
       return new MeteorShowerEventSource();
+    case "aurora":
+      return new AuroraEventSource();
+    case "iss":
+      return new IssPassEventSource();
     case "all":
-      return new CompositeEventSource([
-        buildLocalSource(options),
-        new MeteorShowerEventSource()
-      ]);
+      return new CompositeEventSource(
+        [
+          buildLocalSource(options),
+          new MeteorShowerEventSource(),
+          new AuroraEventSource(),
+          new IssPassEventSource()
+        ],
+        { continueOnSourceError: true }
+      );
   }
 }
 
@@ -271,7 +285,7 @@ function eventLines(event: AstronomyEventCandidate, index: number): string[] {
 function printSummary(options: CliOptions, start: Date, end: Date, count: number): void {
   console.log(`${options.source} astronomy events`);
 
-  if (options.source !== "meteor") {
+  if (options.source === "local" || options.source === "all") {
     console.log(
       `mode: ${options.nativeOnly ? "native Astronomy Engine searches only" : "native searches plus local product heuristics"}`
     );
