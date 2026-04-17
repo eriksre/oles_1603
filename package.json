@@ -4,14 +4,32 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "events": "tsx scripts/query-events.ts --source all",
+    "events:all": "tsx scripts/query-events.ts --source all",
+    "events:local": "tsx scripts/query-events.ts --source local",
+    "events:meteor": "tsx scripts/query-events.ts --source meteor",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "astronomy-engine": "^2.1.19"
+    "astronomy-engine": "^2.1.19",
+    "next": "^16.2.3",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "satellite.js": "^7.0.0",
+    "three": "^0.184.0"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.184.0",
+    "eslint": "^10.2.0",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }

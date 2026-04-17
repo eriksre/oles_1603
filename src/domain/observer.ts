@@ -17,6 +17,7 @@ export interface RecommendationRequest {
   observer: ObserverContext;
   timeRange: TimeRange;
   travelMode?: TravelMode;
+  maxTravelTimeMinutes?: number;
   includeSuppressed?: boolean;
   maxResults?: number;
 }

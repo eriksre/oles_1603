@@ -6,6 +6,7 @@ type FixtureEventType =
   | "lunar_eclipse"
   | "solar_eclipse"
   | "planet_conjunction"
+  | "planet_opposition"
   | "planet_parade"
   | "meteor_shower"
   | "aurora"
@@ -77,6 +78,7 @@ const BASELINE_COOL: Record<FixtureEventType, number> = {
   lunar_eclipse: 95,
   solar_eclipse: 100,
   planet_conjunction: 72,
+  planet_opposition: 76,
   planet_parade: 85,
   meteor_shower: 80,
   aurora: 90,

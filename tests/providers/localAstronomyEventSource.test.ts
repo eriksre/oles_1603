@@ -27,6 +27,25 @@ describe("LocalAstronomyEventSource", () => {
     const eclipse = events.find((event) => event.eventType === "lunar_eclipse");
     expect(eclipse?.title).toContain("lunar eclipse");
     expect(eclipse?.peakTime.toISOString()).toBe("2025-03-14T06:58:42.343Z");
+    expect(eclipse?.targetAltitudeDeg).toBeLessThan(0);
+    expect(eclipse?.localBestViewingAltitudeDeg).toBeGreaterThan(0);
+  });
+
+  it("suppresses instant events when no local above-horizon viewing time exists in the configured window", async () => {
+    const source = new LocalAstronomyEventSource({
+      includeEclipses: false,
+      includeCloseApproaches: false,
+      includePlanetVisibilityEvents: false,
+      includePlanetParades: false,
+      visibilityWindowHours: 0.01
+    });
+
+    const events = await source.generateEvents(sydneyObserver, {
+      start: new Date("2025-03-01T00:00:00Z"),
+      end: new Date("2025-03-31T23:59:59Z")
+    });
+
+    expect(events.map((event) => event.eventType)).not.toContain("full_moon");
   });
 
   it("finds locally-derived best visibility windows for inner planets", async () => {
@@ -49,6 +68,30 @@ describe("LocalAstronomyEventSource", () => {
     expect(venusEvent).toBeDefined();
     expect(venusEvent?.title).toContain("Venus");
     expect(venusEvent?.peakTime.toISOString()).toBe("2025-01-10T04:57:09.665Z");
+  });
+
+  it("derives bright planet oppositions locally", async () => {
+    const source = new LocalAstronomyEventSource({
+      includeMoonEvents: false,
+      includeEclipses: false,
+      includeCloseApproaches: false,
+      includePlanetVisibilityEvents: false,
+      includePlanetParades: false
+    });
+
+    const events = await source.generateEvents(sydneyObserver, {
+      start: new Date("2024-12-01T00:00:00Z"),
+      end: new Date("2024-12-15T23:59:59Z")
+    });
+
+    const opposition = events.find(
+      (event) => event.eventType === "planet_opposition"
+    );
+
+    expect(opposition).toBeDefined();
+    expect(opposition?.title).toBe("Jupiter at opposition");
+    expect(opposition?.localBestViewingTime).toBeDefined();
+    expect(opposition?.localBestViewingAltitudeDeg).toBeGreaterThan(0);
   });
 
   it("detects local moon-planet close approaches without an external API", async () => {

@@ -50,10 +50,11 @@ const needsDarkSky = (eventType: AstronomyEventCandidate["eventType"]): boolean 
 const isSubtleBrightSkyEvent = (event: AstronomyEventCandidate): boolean =>
   (event.eventType === "planetary_conjunction" ||
     event.eventType === "planet_conjunction" ||
+    event.eventType === "planet_opposition" ||
     event.eventType === "mercury_best_visibility" ||
     event.eventType === "venus_best_visibility" ||
     event.eventType === "moon_planet_close_approach") &&
-  (event.targetAltitudeDeg ?? 90) < 10;
+  ((event.localBestViewingAltitudeDeg ?? event.targetAltitudeDeg) ?? 90) < 10;
 
 const weatherPenalty = (event: AstronomyEventCandidate): number => {
   const totalCloud = event.cloudCoverPct ?? 35;
@@ -66,12 +67,16 @@ const weatherPenalty = (event: AstronomyEventCandidate): number => {
 
 export const assessVisibility = (event: AstronomyEventCandidate): VisibilityAssessment => {
   const suppressionReasons: SuppressionReason[] = [];
-  const visibilityBucket = getVisibilityBucket(event.targetAltitudeDeg);
+  const localTargetAltitudeDeg =
+    event.localBestViewingAltitudeDeg ?? event.targetAltitudeDeg;
+  const localSunAltitudeDeg =
+    event.localBestViewingSunAltitudeDeg ?? event.sunAltitudeDeg;
+  const visibilityBucket = getVisibilityBucket(localTargetAltitudeDeg);
   const horizonSensitive = visibilityBucket === "horizon_sensitive";
-  const skyDarkness = getSkyDarkness(event.sunAltitudeDeg);
+  const skyDarkness = getSkyDarkness(localSunAltitudeDeg);
 
   if (
-    event.targetAltitudeDeg === undefined &&
+    localTargetAltitudeDeg === undefined &&
     event.azimuthSpanStartDeg === undefined &&
     event.azimuthSpanEndDeg === undefined
   ) {

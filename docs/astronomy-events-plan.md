@@ -6,22 +6,28 @@ Build a Vercel-hosted product that tells a user about astronomical events **befo
 
 The product should answer four questions:
 
-1. What interesting event is happening soon?
-2. Can I see it from where I am?
-3. If not, where nearby should I go?
-4. Is this event worth my time?
+1. What interesting event is happening soon given my location? Does it meet my coolness threshold?
+2. Is the sky going to be clear? Are there going to be clouds. 
+3. Where nearby should I go? (20 minute drive)
 
 ## Product Shape
 
 The product has three layers:
 
-1. `Event generation`: identify upcoming astronomy events.
-2. `Visibility filtering`: determine whether the event is practically observable from a candidate location at a given time.
+1. `Event generation`: identify upcoming astronomy events in a particular place on earth.
+2. `Visibility filtering`: determine whether the event is practically observable from a candidate location at a given time - clouds. 
 3. `Place recommendation`: rank nearby viewpoints and suggest the best one.
 
 The user experience should reduce to a simple recommendation such as:
 
 `Blood moon tonight at 7:18 PM. Best viewing spot is Observatory Hill. Face 102 deg ESE and look 8 deg above the horizon. Cool score: 91.`
+
+The LLM is not the astronomy source of truth.
+
+- The event engine decides what event exists and when it happens.
+- The maps provider decides what places are reachable within the drive cap.
+- The weather provider decides whether conditions are usable.
+- OpenRouter with `gpt-5.4-mini` decides between close candidate places and writes the short event description shown to the user.
 
 ## Design Principles
 
@@ -86,14 +92,16 @@ These should come from external sources because they are dynamic or operational.
 - Aurora activity
 - Satellite / ISS passes
 - Weather and cloud forecast
-- Routing, places, elevation, and geocoding
+- Places, routing, and geocoding
+- LLM-assisted location choice and event description
 
 Recommended sources:
 
 - Aurora: [NOAA SWPC Aurora 30-minute Forecast](https://www.swpc.noaa.gov/products/aurora-30-minute-forecast) and [Aurora Viewline Tonight and Tomorrow Night](https://www.swpc.noaa.gov/products/aurora-viewline-tonight-and-tomorrow-night-experimental). Also [NASA DONKI API](https://api.nasa.gov/) for geomagnetic storm and solar flare alerts (free, REST).
 - ISS passes: [N2YO API](https://www.n2yo.com/api/) — free account required, 100 visual pass queries/hr. Provides rise/peak/set azimuth and altitude directly. **Note: the OpenNotify ISS pass endpoint (`/iss-pass.json`) was removed in 2020 and no longer works.**
 - Weather: [Open-Meteo](https://open-meteo.com/en/docs) for cloud cover, [7Timer! ASTRO](http://7timer.info/doc.php?lang=en#astro) for seeing and atmospheric transparency
-- Maps and routing: Overpass API (OSM) for viewpoints; Google Maps Platform as a fallback
+- Maps and routing: Google Maps Platform for candidate places plus drive-time filtering
+- LLM: [OpenRouter](https://openrouter.ai/) with `gpt-5.4-mini` for location tie-breaking and event copy
 
 ## Recommended MVP Event Catalog
 
@@ -235,18 +243,18 @@ Rules of thumb:
 - Meteor showers and aurora depend heavily on total cloud cover and darkness.
 - Bright planets and the Moon can tolerate moderate haze or partial cloud.
 
-### Step 4: Line of Sight
+### Step 4: Place Selection
 
 This is the place-selection problem.
 
 For the MVP, use heuristics:
 
-- Prefer higher elevation places (scored using OpenTopoData elevation queries).
-- Prefer place types with open sky or open horizon.
-- Penalize dense urban or obstructed viewpoints for low-altitude events.
-- Treat east-facing and west-facing horizon events as needing more open terrain than high-altitude events.
-- Prefer places with low VIIRS nighttime radiance (darker sky) for meteor showers, aurora, and faint conjunctions.
-- Flag and boost any candidate that overlaps a DarkSky International certified location.
+- Search candidate places from a maps API around the user.
+- Compute drive time for each candidate and discard anything above the travel cap.
+- Prefer places with a clearer horizon for low-altitude events.
+- Prefer places that are faster to reach when multiple candidates are otherwise similar.
+- Treat the default MVP cap as `20 minutes driving`.
+- If two candidates are close, use OpenRouter to choose the better one and produce the final human-readable description.
 
 Later, this can be improved with terrain horizon profiling: sample DEM elevation at N points along the target azimuth from the candidate location and compute the actual horizon angle in that direction. This tells you whether a hill or building is blocking a low-altitude event from that specific spot.
 
@@ -298,17 +306,13 @@ The system should evaluate nearby candidate places and pick the one that best ba
 
 ### Candidate Place Types
 
-Use the following OSM tags via the Overpass API (preferred) or Google Places types as a fallback:
+Use the maps provider to search for candidate places like:
 
-| OSM tag | Google Places type | Meaning |
-|---|---|---|
-| `tourism=viewpoint` | `scenic_spot` | Explicitly mapped viewpoints |
-| `natural=peak` | `mountain_peak` | Named hilltops and summits |
-| `man_made=tower` + `tower:type=observation` | `observation_deck` | Observation towers |
-| `boundary=national_park` | `national_park` | Protected dark areas |
-| `leisure=park` | `city_park` | Urban parks (fallback) |
-| `tourism=camp_site` | `campground` | Campgrounds (often dark) |
-| — | `beach` | Open horizon for coastal events |
+- viewpoint / lookout
+- observation deck
+- park
+- beach
+- other obvious open-sky public spots
 
 ### Place Ranking Inputs
 
@@ -316,7 +320,6 @@ Each candidate place should be scored using:
 
 - travel time from user
 - distance
-- elevation
 - place type
 - openness heuristic for target azimuth
 - local weather at that point if available
@@ -325,12 +328,10 @@ Each candidate place should be scored using:
 
 - For moonrise, sunrise-adjacent events, or low-altitude eclipses:
   - strongly prefer east- or west-open horizon places
-- For meteor showers:
-  - prefer darker, more open locations
-- For aurora:
-  - prefer open poleward horizon views
 - For planets high in the sky:
   - travel time matters more than open horizon
+- In all cases:
+  - do not recommend any place beyond the configured drive-time cap
 
 ## Cool Scale
 
@@ -417,37 +418,22 @@ Useful weather fields:
 
 ### Maps and Location
 
-**Viewpoint search:** [Overpass API (OpenStreetMap)](https://overpass-api.de/) — free, no key, no daily cap (fair use). Query `tourism=viewpoint`, `natural=peak`, `man_made=tower` with `tower:type=observation`, and `boundary=national_park` within a radius of the user. OSM is the only major source with an explicit viewpoint tag; Google Maps has no equivalent. Add a `User-Agent` header identifying the app per OSM usage policy.
+**Primary maps stack:** Google Maps Platform.
 
-Example OverpassQL pattern:
-```
-[out:json][timeout:25];
-(
-  node["tourism"="viewpoint"](around:30000, LAT, LON);
-  node["natural"="peak"](around:30000, LAT, LON);
-  node["man_made"="tower"]["tower:type"="observation"](around:30000, LAT, LON);
-);
-out body;
-```
+Use:
 
-**Elevation scoring:** [OpenTopoData](https://www.opentopodata.org/) — free, no key, 1,000 calls/day (self-hostable). Use the Copernicus DEM dataset (global, 30 m resolution). Batch-query elevation for all candidate viewpoints and rank by elevation above local mean.
+- Places API to search nearby viewpoints, lookouts, parks, beaches, and observation decks
+- Routes API to calculate drive time from the user to each candidate place
+- Geocoding if we need manual search or reverse-geocoded labels
 
-**Routing:** [OpenRouteService](https://openrouteservice.org/) — free account, 7,000+ calls/day. Driving, walking, and cycling directions. Substantially more generous free tier than Google Directions (10,000/month) or Mapbox Directions (100,000/month).
+The key product rule is:
 
-**Geocoding / reverse geocoding:** [Nominatim (OpenStreetMap)](https://nominatim.org/) — free, no key. Use for converting a user's lat/lon to a human-readable place name and for manual location search.
+- Search candidate places around the user
+- Calculate drive time for each
+- Keep only places reachable within `20 minutes driving`
+- Rank the remaining places by travel time plus viewing suitability for the event direction
 
-**Google Maps Platform:** Keep as a fallback option. The Places Nearby Search API costs $32/1,000 requests after the first 5,000/month, which is expensive for a high-traffic app. Elevation costs $5/1,000 after 5,000/month. Prefer the free OSM stack for the MVP.
-
-**Map display:** [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/guides/) (free up to 50,000 map loads/month) or [Leaflet](https://leafletjs.com/) with OSM tiles (free, unlimited).
-
-### Light Pollution
-
-No live REST API exists for light pollution. The practical approach:
-
-- **Data source:** [NASA Black Marble VIIRS Annual Composite](https://eogdata.mines.edu/products/vnl/) — free, CC BY 4.0, ~500 m resolution, updated annually.
-- **Implementation:** Download the annual global GeoTIFF once. Use [`geotiff.js`](https://geotiffjs.github.io/) in a Next.js serverless function to read the radiance value at any coordinate. Convert radiance to a Bortle scale estimate (1 = darkest, 9 = city centre). Store the file in Vercel Blob or an S3-compatible bucket and stream the relevant tile on demand.
-- **Alternative:** Query `NOAA/VIIRS/DNB/ANNUAL_V22` via the [Google Earth Engine REST API](https://developers.google.com/earth-engine/reference/rest) — scalable, but requires a GCP OAuth setup.
-- **Certified dark sky parks:** Maintain a static JSON file of [DarkSky International](https://darksky.org/what-we-do/international-dark-sky-places/) certified locations (~250 globally). Flag any candidate viewpoint that falls within or near a certified park. Update the file once per year.
+Map display can still use any normal frontend mapping library later. That is separate from the backend place-selection logic.
 
 ### Notifications
 
@@ -469,6 +455,10 @@ No live REST API exists for light pollution. The practical approach:
 
 - Next.js app on Vercel
 - API routes or server actions for event queries
+- an `events API` that composes event generation, weather, and maps routing
+- a `weather API` connection for cloud/visibility data
+- a `maps API` connection for candidate places and drive-time filtering
+- an `LLM API` connection via OpenRouter for location tie-breaking and event description
 - Scheduled background jobs for refreshing external feeds and curated event windows
 
 ### Data Layers
@@ -476,7 +466,7 @@ No live REST API exists for light pollution. The practical approach:
 - Derived event calculators
 - Curated event JSON for meteor showers
 - Weather fetchers
-- Maps / place fetchers
+- Maps / route fetchers
 - Event scoring engine
 
 ## Recommended Implementation Order
@@ -512,10 +502,10 @@ Output:
 
 Add:
 
-- nearby place search
-- travel-time ranking
-- elevation-aware heuristics
+- maps place search
+- route-time filtering with a `20 minute drive` cap
 - direction-aware place filtering
+- candidate ranking for the best reachable place
 
 Output:
 
@@ -544,6 +534,26 @@ The MVP is successful if a user can:
 4. understand exactly when and where to look
 5. optionally get a better nearby viewing recommendation
 
+## MVP Required APIs
+
+The MVP backend must have these three integrations:
+
+1. `Events API`
+   - backed by local event generation using Astronomy Engine
+   - returns normalized event candidates for a place and time range
+2. `Weather API`
+   - cloud and visibility forecast for the observer and optionally candidate places
+3. `Maps API`
+   - candidate place search
+   - drive-time calculation
+   - filter to places reachable within `20 minutes driving`
+
+4. `LLM API`
+   - OpenRouter as the provider
+   - `gpt-5.4-mini` as the default model
+   - chooses between close candidate locations
+   - writes the short event description shown to the user
+
 ## API Reference Summary
 
 | Service | Purpose | Cost | Key required? |
@@ -551,24 +561,17 @@ The MVP is successful if a user can:
 | Astronomy Engine (JS lib) | All derived event calculations | Free | No |
 | Open-Meteo | Cloud cover (stratified), weather | Free, 10k/day | No |
 | 7Timer! ASTRO | Seeing, atmospheric transparency | Free, no documented cap | No |
-| USNO API | Authoritative eclipses, moon phases, rise/set | Free | No |
-| NASA NeoWs | Asteroid close approaches | Free, 1,000/hr | Free signup |
 | NASA DONKI | Space weather, aurora triggers, solar flares | Free, 1,000/hr | Free signup |
-| JPL CAD API | Comet/asteroid close approach table | Free | No |
-| JPL Horizons REST | Precision ephemerides (any body) | Free | No |
 | N2YO API | ISS and satellite pass predictions | Free, 100 visual/hr | Free signup |
-| CelesTrak | TLE data for satellites | Free | No |
-| Overpass API (OSM) | Viewpoints, peaks, parks near user | Free, ~3–5 req/sec | No |
-| OpenTopoData | Elevation at coordinates | Free, 1,000/day | No |
-| OpenRouteService | Driving/walking directions to spots | Free, 7,000+/day | Free signup |
-| Nominatim (OSM) | Reverse geocoding, location search | Free | No |
-| NASA VIIRS GeoTIFF | Light pollution / Bortle scale | Free, CC BY 4.0 download | NASA Earthdata login |
-| DarkSky Intl. places | Certified dark sky park list | Free (static scrape) | No |
-| Mapbox GL JS | Map display | Free, 50k loads/month | Mapbox token |
-| Astrospheric API | Seeing + transparency (better accuracy) | ~$15 CAD/yr | Pro membership |
-| Google Maps Platform | Fallback for places, routing, elevation | $32/1k (Places), $5/1k (others) | GCP key |
+| Google Maps Platform | Places search, routing, geocoding, drive-time filtering | Paid | GCP key |
+| OpenRouter | LLM tie-breaking and event description generation | Paid | API key |
 
-Services in the top block (through Mapbox) can support a full MVP with no API costs and minimal key management.
+For the actual MVP path, the required stack is:
+
+- Astronomy Engine for event generation
+- Open-Meteo for weather
+- Google Maps Platform for place search plus route-time filtering
+- OpenRouter for location choice and the short user-facing description
 
 ## Risks and Constraints
 

@@ -94,16 +94,9 @@ const scorePlaceForEvent = (
 ): number => {
   const openness = place.directionOpennessScore ?? 55;
   const elevation = Math.max(0, Math.min(100, (place.elevationM ?? 0) / 10));
-  const darkness = 100 - (place.lightPollutionScore ?? 45);
   const travel = travelTimeMinutes === undefined ? 70 : Math.max(10, 100 - travelTimeMinutes * 1.5);
 
   let score = travel * 0.35 + elevation * 0.2 + openness * 0.25;
-
-  if (prefersDarkSky(event.eventType)) {
-    score += darkness * 0.3;
-  } else {
-    score += darkness * 0.1;
-  }
 
   if (prefersOpenHorizon(event)) {
     score += openness * 0.25;
@@ -203,9 +196,25 @@ export class RecommendationService {
     const travelByPlaceId = new Map(
       travelEstimates.map((estimate) => [estimate.placeId, estimate] as const)
     );
+    const maxTravelTimeMinutes = request.maxTravelTimeMinutes;
+    const candidatePlaces =
+      maxTravelTimeMinutes === undefined
+        ? places
+        : places.filter((place) => {
+            const estimate = travelByPlaceId.get(place.id);
+
+            return (
+              estimate !== undefined &&
+              estimate.travelTimeMinutes <= maxTravelTimeMinutes
+            );
+          });
+
+    if (candidatePlaces.length === 0) {
+      return events;
+    }
 
     return events.map((event) => {
-      const rankedPlaces = [...places].sort((left, right) => {
+      const rankedPlaces = [...candidatePlaces].sort((left, right) => {
         const leftEstimate = travelByPlaceId.get(left.id);
         const rightEstimate = travelByPlaceId.get(right.id);
 

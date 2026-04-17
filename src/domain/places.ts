@@ -20,7 +20,6 @@ export interface PlaceCandidate {
   elevationM?: number;
   placeType: PlaceType;
   directionOpennessScore?: number;
-  lightPollutionScore?: number;
   tags?: Record<string, string>;
 }
 

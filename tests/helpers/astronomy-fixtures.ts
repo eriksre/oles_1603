@@ -4,6 +4,7 @@ export type EventType =
   | "lunar_eclipse"
   | "solar_eclipse"
   | "planet_conjunction"
+  | "planet_opposition"
   | "planet_parade"
   | "meteor_shower"
   | "aurora"

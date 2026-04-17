@@ -28,7 +28,12 @@ describe("meteor shower catalog", () => {
       name: "Perseids",
       startTimeUtc: "2026-07-17T00:00:00.000Z",
       endTimeUtc: "2026-08-24T00:00:00.000Z",
-      radiant: "Perseus"
+      radiant: "Perseus",
+      radiantRaDeg: 48,
+      radiantDecDeg: 58.1,
+      expectedZhr: 100,
+      velocityKmS: 59,
+      parentBody: "109P/Swift-Tuttle"
     });
   });
 

@@ -21,6 +21,7 @@ const EVENT_PROFILES: Record<EventType, EventProfile> = {
   moon_planet_close_approach: { rarity: 70, visualImpact: 70, nakedEye: 90, baselineCool: 70 },
   planet_conjunction: { rarity: 78, visualImpact: 75, nakedEye: 82, baselineCool: 74 },
   planetary_conjunction: { rarity: 78, visualImpact: 75, nakedEye: 82, baselineCool: 74 },
+  planet_opposition: { rarity: 70, visualImpact: 78, nakedEye: 78, baselineCool: 76 },
   mercury_best_visibility: { rarity: 62, visualImpact: 48, nakedEye: 42, baselineCool: 38 },
   venus_best_visibility: { rarity: 64, visualImpact: 72, nakedEye: 92, baselineCool: 76 },
   planet_parade: { rarity: 88, visualImpact: 88, nakedEye: 85, baselineCool: 85 },

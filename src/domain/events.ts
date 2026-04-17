@@ -6,6 +6,7 @@ export const EVENT_TYPES = [
   "moon_planet_close_approach",
   "planet_conjunction",
   "planetary_conjunction",
+  "planet_opposition",
   "mercury_best_visibility",
   "venus_best_visibility",
   "planet_parade",
@@ -72,6 +73,13 @@ export interface AstronomyGeometry {
   sunAltitudeDeg?: number;
   moonAltitudeDeg?: number;
   moonIllumination?: number;
+  localBestViewingTime?: Date;
+  localBestViewingAzimuthDeg?: number;
+  localBestViewingAltitudeDeg?: number;
+  localBestViewingDirectionLabel?: string;
+  localBestViewingSunAltitudeDeg?: number;
+  localBestViewingMoonAltitudeDeg?: number;
+  localBestViewingMoonIllumination?: number;
 }
 
 export interface PracticalConditions {

@@ -1,4 +1,10 @@
-import {
+import { createRequire } from "node:module";
+import type * as AstronomyEngine from "astronomy-engine";
+
+const require = createRequire(import.meta.url);
+const Astronomy = require("astronomy-engine") as typeof AstronomyEngine;
+
+const {
   AngleBetween,
   ApsisKind,
   Body,
@@ -15,8 +21,12 @@ import {
   SearchLunarEclipse,
   SearchMaxElongation,
   SearchMoonQuarter,
-  SearchPeakMagnitude
-} from "astronomy-engine";
+  SearchPeakMagnitude,
+  SearchRelativeLongitude
+} = Astronomy;
+
+type AstronomyBody = (typeof Body)[keyof typeof Body];
+type AstronomyObserver = InstanceType<typeof Observer>;
 
 import type { AstronomyEventCandidate } from "../../domain/events.js";
 import type { ObserverContext, TimeRange } from "../../domain/observer.js";
@@ -24,6 +34,7 @@ import type { AstronomyEventSource } from "../../engine/contracts.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const VISIBILITY_SAMPLE_MS = 15 * 60 * 1000;
 const SAMPLE_BODIES = [
   Body.Mercury,
   Body.Venus,
@@ -31,6 +42,7 @@ const SAMPLE_BODIES = [
   Body.Jupiter,
   Body.Saturn
 ] as const;
+const OPPOSITION_BODIES = [Body.Mars, Body.Jupiter, Body.Saturn] as const;
 const MOON_CLOSE_APPROACH_BODIES = [Body.Venus, Body.Jupiter, Body.Saturn] as const;
 const PLANETARY_CONJUNCTION_PAIRS = [
   [Body.Mercury, Body.Venus],
@@ -68,7 +80,7 @@ function toDirectionLabel(azimuthDeg: number): string {
   return CARDINAL_LABELS[index];
 }
 
-function toObserver(observer: ObserverContext): Observer {
+function toObserver(observer: ObserverContext): AstronomyObserver {
   return new Observer(
     observer.latitude,
     observer.longitude,
@@ -77,7 +89,7 @@ function toObserver(observer: ObserverContext): Observer {
 }
 
 function buildBodyGeometry(
-  body: Body,
+  body: AstronomyBody,
   time: Date,
   observer: ObserverContext
 ): Pick<
@@ -120,8 +132,8 @@ function buildBodyGeometry(
 }
 
 function pairSeparationDeg(
-  body1: Body,
-  body2: Body,
+  body1: AstronomyBody,
+  body2: AstronomyBody,
   time: Date,
   observer: ObserverContext
 ): number {
@@ -182,6 +194,108 @@ function baseEvent(
   };
 }
 
+function instantVisibilityWindow(peakTime: Date, hours: number) {
+  const halfWindowMs = hours * HOUR_MS;
+
+  return {
+    start: new Date(peakTime.getTime() - halfWindowMs),
+    end: new Date(peakTime.getTime() + halfWindowMs)
+  };
+}
+
+function addLocalBestViewing(
+  event: AstronomyEventCandidate,
+  targetBodies: readonly AstronomyBody[],
+  observer: ObserverContext,
+  window: { start: Date; end: Date }
+): AstronomyEventCandidate {
+  let best:
+    | {
+        time: Date;
+        primaryGeometry: ReturnType<typeof buildBodyGeometry>;
+        minimumAltitudeDeg: number;
+      }
+    | undefined;
+  const startMs = window.start.getTime();
+  const endMs = window.end.getTime();
+
+  if (targetBodies.length === 0 || endMs < startMs) {
+    return event;
+  }
+
+  for (let timeMs = startMs; timeMs <= endMs; timeMs += VISIBILITY_SAMPLE_MS) {
+    const sampleTime = new Date(timeMs);
+    const geometries = targetBodies.map((body) =>
+      buildBodyGeometry(body, sampleTime, observer)
+    );
+    const minimumAltitudeDeg = Math.min(
+      ...geometries.map((geometry) => geometry.targetAltitudeDeg ?? -90)
+    );
+    const sunAltitudeDeg = geometries[0]?.sunAltitudeDeg ?? 90;
+
+    if (
+      minimumAltitudeDeg > 0 &&
+      isDarkEnoughForEvent(event, sunAltitudeDeg) &&
+      (!best || minimumAltitudeDeg > best.minimumAltitudeDeg)
+    ) {
+      best = {
+        time: sampleTime,
+        primaryGeometry: geometries[0],
+        minimumAltitudeDeg
+      };
+    }
+  }
+
+  if (!best) {
+    return event;
+  }
+
+  return {
+    ...event,
+    localBestViewingTime: best.time,
+    localBestViewingAzimuthDeg: best.primaryGeometry.targetAzimuthDeg,
+    localBestViewingAltitudeDeg: best.primaryGeometry.targetAltitudeDeg,
+    localBestViewingDirectionLabel: best.primaryGeometry.targetDirectionLabel,
+    localBestViewingSunAltitudeDeg: best.primaryGeometry.sunAltitudeDeg,
+    localBestViewingMoonAltitudeDeg: best.primaryGeometry.moonAltitudeDeg,
+    localBestViewingMoonIllumination: best.primaryGeometry.moonIllumination,
+    instructionText: best.primaryGeometry.targetDirectionLabel
+      ? `At ${best.time.toISOString()}, face ${best.primaryGeometry.targetDirectionLabel} and look ${Math.max(
+          0,
+          Math.round(best.primaryGeometry.targetAltitudeDeg ?? 0)
+        )} degrees above the horizon.`
+      : event.instructionText
+  };
+}
+
+function isDarkEnoughForEvent(
+  event: Pick<AstronomyEventCandidate, "eventType">,
+  sunAltitudeDeg: number
+): boolean {
+  switch (event.eventType) {
+    case "solar_eclipse":
+      return sunAltitudeDeg > 0;
+    case "full_moon":
+    case "supermoon":
+    case "lunar_eclipse":
+      return sunAltitudeDeg <= 0;
+    case "mercury_best_visibility":
+    case "venus_best_visibility":
+    case "moon_planet_close_approach":
+    case "planet_conjunction":
+    case "planetary_conjunction":
+    case "planet_opposition":
+      return sunAltitudeDeg <= -6;
+    case "planet_parade":
+    case "meteor_shower":
+    case "aurora":
+    case "iss_pass":
+      return sunAltitudeDeg <= -6;
+    default:
+      return sunAltitudeDeg <= -6;
+  }
+}
+
 function nearestLunarApsis(time: Date) {
   const searchStart = new Date(time.getTime() - 16 * DAY_MS);
   let apsis = SearchLunarApsis(searchStart);
@@ -203,7 +317,8 @@ function nearestLunarApsis(time: Date) {
 
 function buildFullMoonEvents(
   observer: ObserverContext,
-  timeRange: TimeRange
+  timeRange: TimeRange,
+  visibilityWindowHours: number
 ): AstronomyEventCandidate[] {
   const events: AstronomyEventCandidate[] = [];
   let quarter = SearchMoonQuarter(new Date(timeRange.start.getTime() - 35 * DAY_MS));
@@ -218,15 +333,22 @@ function buildFullMoonEvents(
       const geometry = buildBodyGeometry(Body.Moon, quarter.time.date, observer);
       const eventType = isSupermoon ? "supermoon" : "full_moon";
 
-      events.push(
-        baseEvent({
+      const event = baseEvent({
           eventType,
           title: isSupermoon ? "Supermoon" : "Full moon",
           startTime: quarter.time.date,
           peakTime: quarter.time.date,
           endTime: quarter.time.date,
           ...geometry
-        })
+        });
+
+      events.push(
+        addLocalBestViewing(
+          event,
+          [Body.Moon],
+          observer,
+          instantVisibilityWindow(event.peakTime, visibilityWindowHours)
+        )
       );
     }
 
@@ -248,8 +370,7 @@ function buildLunarEclipseEvents(
       const peakTime = eclipse.peak.date;
       const geometry = buildBodyGeometry(Body.Moon, peakTime, observer);
 
-      events.push(
-        baseEvent({
+      const event = baseEvent({
           eventType: "lunar_eclipse",
           title:
             eclipse.kind === "total"
@@ -263,6 +384,12 @@ function buildLunarEclipseEvents(
           endTime: new Date(peakTime.getTime() + eclipse.sd_penum * 60_000),
           confidence: eclipse.kind === "penumbral" ? 0.6 : 0.98,
           ...geometry
+        });
+
+      events.push(
+        addLocalBestViewing(event, [Body.Moon], observer, {
+          start: event.startTime,
+          end: event.endTime
         })
       );
     }
@@ -286,8 +413,7 @@ function buildLocalSolarEclipseEvents(
       const peakTime = eclipse.peak.time.date;
       const geometry = buildBodyGeometry(Body.Sun, peakTime, observer);
 
-      events.push(
-        baseEvent({
+      const event = baseEvent({
           eventType: "solar_eclipse",
           title:
             eclipse.kind === "total"
@@ -301,6 +427,12 @@ function buildLocalSolarEclipseEvents(
           endTime: eclipse.partial_end.time.date,
           confidence: eclipse.peak.altitude > 0 ? 0.98 : 0.5,
           ...geometry
+        });
+
+      events.push(
+        addLocalBestViewing(event, [Body.Sun], observer, {
+          start: event.startTime,
+          end: event.endTime
         })
       );
     }
@@ -313,7 +445,8 @@ function buildLocalSolarEclipseEvents(
 
 function buildMaxVisibilityEvents(
   observer: ObserverContext,
-  timeRange: TimeRange
+  timeRange: TimeRange,
+  visibilityWindowHours: number
 ): AstronomyEventCandidate[] {
   const events: AstronomyEventCandidate[] = [];
 
@@ -329,8 +462,7 @@ function buildMaxVisibilityEvents(
 
       const geometry = buildBodyGeometry(body, event.time.date, observer);
 
-      events.push(
-        baseEvent({
+      const appEvent = baseEvent({
           eventType:
             body === Body.Mercury
               ? "mercury_best_visibility"
@@ -342,7 +474,15 @@ function buildMaxVisibilityEvents(
           endTime: event.time.date,
           confidence: 0.86,
           ...geometry
-        })
+        });
+
+      events.push(
+        addLocalBestViewing(
+          appEvent,
+          [body],
+          observer,
+          instantVisibilityWindow(appEvent.peakTime, visibilityWindowHours)
+        )
       );
 
       cursor = new Date(event.time.date.getTime() + 2 * DAY_MS);
@@ -358,8 +498,7 @@ function buildMaxVisibilityEvents(
     }
 
     const geometry = buildBodyGeometry(Body.Venus, event.time.date, observer);
-    events.push(
-      baseEvent({
+    const appEvent = baseEvent({
         eventType: "venus_best_visibility",
         title: "Venus near peak brightness",
         description: "Venus appears close to its brightest as seen from Earth.",
@@ -368,7 +507,15 @@ function buildMaxVisibilityEvents(
         endTime: event.time.date,
         confidence: 0.9,
         ...geometry
-      })
+      });
+
+    events.push(
+      addLocalBestViewing(
+        appEvent,
+        [Body.Venus],
+        observer,
+        instantVisibilityWindow(appEvent.peakTime, visibilityWindowHours)
+      )
     );
 
     venusCursor = new Date(event.time.date.getTime() + 20 * DAY_MS);
@@ -377,9 +524,61 @@ function buildMaxVisibilityEvents(
   return events;
 }
 
+function buildPlanetOppositionEvents(
+  observer: ObserverContext,
+  timeRange: TimeRange,
+  visibilityWindowHours: number
+): AstronomyEventCandidate[] {
+  const events: AstronomyEventCandidate[] = [];
+
+  for (const body of OPPOSITION_BODIES) {
+    let cursor = new Date(timeRange.start);
+
+    while (cursor <= timeRange.end) {
+      const oppositionTime = SearchRelativeLongitude(body, 0, cursor).date;
+
+      if (oppositionTime > timeRange.end) {
+        break;
+      }
+
+      if (oppositionTime >= timeRange.start) {
+        const illumination = Illumination(body, oppositionTime);
+        const geometry = buildBodyGeometry(body, oppositionTime, observer);
+        const appEvent = baseEvent({
+          eventType: "planet_opposition",
+          title: `${body} at opposition`,
+          description: `${body} is opposite the Sun in Earth's sky and is well placed for all-night viewing.`,
+          startTime: oppositionTime,
+          peakTime: oppositionTime,
+          endTime: oppositionTime,
+          confidence: 0.9,
+          ...geometry
+        });
+
+        events.push(
+          addLocalBestViewing(
+            {
+              ...appEvent,
+              description: `${appEvent.description} Approximate magnitude: ${illumination.mag.toFixed(1)}.`
+            },
+            [body],
+            observer,
+            instantVisibilityWindow(appEvent.peakTime, visibilityWindowHours)
+          )
+        );
+      }
+
+      cursor = new Date(oppositionTime.getTime() + 30 * DAY_MS);
+    }
+  }
+
+  return events;
+}
+
 function buildCloseApproachEvents(
   observer: ObserverContext,
-  timeRange: TimeRange
+  timeRange: TimeRange,
+  visibilityWindowHours: number
 ): AstronomyEventCandidate[] {
   const events: AstronomyEventCandidate[] = [];
   const searchConfigs = [
@@ -452,8 +651,7 @@ function buildCloseApproachEvents(
             Math.abs(lastEvent.peakTime.getTime() - refinedPeak.getTime()) >
               12 * HOUR_MS
           ) {
-            events.push(
-              baseEvent({
+            const event = baseEvent({
                 eventType: config.eventType,
                 title: config.title,
                 description: `${config.body1} and ${config.body2} make a close apparent approach.`,
@@ -462,7 +660,15 @@ function buildCloseApproachEvents(
                 endTime: refinedPeak,
                 confidence: 0.88,
                 ...geometry
-              })
+              });
+
+            events.push(
+              addLocalBestViewing(
+                event,
+                [config.body1, config.body2],
+                observer,
+                instantVisibilityWindow(event.peakTime, visibilityWindowHours)
+              )
             );
           }
         }
@@ -537,8 +743,7 @@ function buildPlanetParades(
         .filter((value): value is number => value !== undefined);
       const representative = active.peakBodies[0]?.geometry;
 
-      events.push(
-        baseEvent({
+      const event = baseEvent({
           eventType: "planet_parade",
           title: "Planet parade",
           description: `Multiple bright planets are visible together.`,
@@ -559,8 +764,18 @@ function buildPlanetParades(
           sunAltitudeDeg: representative?.sunAltitudeDeg,
           moonAltitudeDeg: representative?.moonAltitudeDeg,
           moonIllumination: representative?.moonIllumination
-        })
-      );
+        });
+
+      events.push({
+        ...event,
+        localBestViewingTime: event.peakTime,
+        localBestViewingAzimuthDeg: event.targetAzimuthDeg,
+        localBestViewingAltitudeDeg: event.targetAltitudeDeg,
+        localBestViewingDirectionLabel: event.targetDirectionLabel,
+        localBestViewingSunAltitudeDeg: event.sunAltitudeDeg,
+        localBestViewingMoonAltitudeDeg: event.moonAltitudeDeg,
+        localBestViewingMoonIllumination: event.moonIllumination
+      });
       active = undefined;
     }
   }
@@ -572,11 +787,18 @@ export interface LocalAstronomyEventSourceOptions {
   includeMoonEvents?: boolean;
   includeEclipses?: boolean;
   includeCloseApproaches?: boolean;
+  includePlanetOppositions?: boolean;
   includePlanetVisibilityEvents?: boolean;
   includePlanetParades?: boolean;
+  includeBelowHorizon?: boolean;
+  visibilityWindowHours?: number;
 }
 
-export class LocalAstronomyEventSource implements AstronomyEventSource {
+function isAboveHorizon(event: AstronomyEventCandidate): boolean {
+  return (event.localBestViewingAltitudeDeg ?? Number.NEGATIVE_INFINITY) > 0;
+}
+
+export class AstronomyEngineEventSource implements AstronomyEventSource {
   public constructor(
     private readonly options: LocalAstronomyEventSourceOptions = {}
   ) {}
@@ -586,9 +808,10 @@ export class LocalAstronomyEventSource implements AstronomyEventSource {
     timeRange: TimeRange
   ): Promise<AstronomyEventCandidate[]> {
     const events: AstronomyEventCandidate[] = [];
+    const visibilityWindowHours = this.options.visibilityWindowHours ?? 24;
 
     if (this.options.includeMoonEvents ?? true) {
-      events.push(...buildFullMoonEvents(observer, timeRange));
+      events.push(...buildFullMoonEvents(observer, timeRange, visibilityWindowHours));
     }
 
     if (this.options.includeEclipses ?? true) {
@@ -597,19 +820,35 @@ export class LocalAstronomyEventSource implements AstronomyEventSource {
     }
 
     if (this.options.includePlanetVisibilityEvents ?? true) {
-      events.push(...buildMaxVisibilityEvents(observer, timeRange));
+      events.push(
+        ...buildMaxVisibilityEvents(observer, timeRange, visibilityWindowHours)
+      );
+    }
+
+    if (this.options.includePlanetOppositions ?? true) {
+      events.push(
+        ...buildPlanetOppositionEvents(observer, timeRange, visibilityWindowHours)
+      );
     }
 
     if (this.options.includeCloseApproaches ?? true) {
-      events.push(...buildCloseApproachEvents(observer, timeRange));
+      events.push(
+        ...buildCloseApproachEvents(observer, timeRange, visibilityWindowHours)
+      );
     }
 
     if (this.options.includePlanetParades ?? true) {
       events.push(...buildPlanetParades(observer, timeRange));
     }
 
-    return events.sort(
+    const sortedEvents = events.sort(
       (left, right) => left.peakTime.getTime() - right.peakTime.getTime()
     );
+
+    return this.options.includeBelowHorizon
+      ? sortedEvents
+      : sortedEvents.filter(isAboveHorizon);
   }
 }
+
+export class LocalAstronomyEventSource extends AstronomyEngineEventSource {}
