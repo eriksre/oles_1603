@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Space_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
@@ -21,6 +21,13 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: "ORRERY — Astronomy Events",
   description: "Local astronomy event recommendations."
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#030308"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

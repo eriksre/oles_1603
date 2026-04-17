@@ -41,27 +41,44 @@ export default function OrreryPage() {
     const bgCtx = bgCanvas.getContext('2d')!;
     let stars: Star[] = [];
     let nebulae: Nebula[] = [];
+    // Logical (CSS) size of the background; drawing code operates in these
+    // units while the backing store is scaled up for the device's pixel ratio
+    // so stars/nebulae stay crisp on high-DPI phones & retina displays.
+    let bgW = 0;
+    let bgH = 0;
 
     function initBg() {
-      bgCanvas.width  = window.innerWidth;
-      bgCanvas.height = window.innerHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      bgW = window.innerWidth;
+      bgH = window.innerHeight;
+      bgCanvas.width  = Math.round(bgW * dpr);
+      bgCanvas.height = Math.round(bgH * dpr);
+      bgCanvas.style.width  = `${bgW}px`;
+      bgCanvas.style.height = `${bgH}px`;
+      // Reset any previous transform, then scale so 1 drawing unit = 1 CSS px.
+      bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      stars = Array.from({ length: 300 }, () => ({
-        x: Math.random() * bgCanvas.width,
-        y: Math.random() * bgCanvas.height,
-        r: Math.random() * 1.4,
+      // Scale star count with viewport area so mobile isn't too sparse and
+      // huge displays aren't too dense. ~1 star per 7000 px² of viewport.
+      const starCount = Math.round(
+        Math.min(700, Math.max(200, (bgW * bgH) / 7000)),
+      );
+      stars = Array.from({ length: starCount }, () => ({
+        x: Math.random() * bgW,
+        y: Math.random() * bgH,
+        r: 0.3 + Math.random() * 1.3,
         phase: Math.random() * Math.PI * 2,
       }));
 
       nebulae = [
-        { x: bgCanvas.width * 0.22, y: bgCanvas.height * 0.28, rx: 380, ry: 240, c: 'rgba(80,20,130,0.07)' },
-        { x: bgCanvas.width * 0.78, y: bgCanvas.height * 0.72, rx: 300, ry: 400, c: 'rgba(140,40,20,0.055)' },
-        { x: bgCanvas.width * 0.60, y: bgCanvas.height * 0.18, rx: 220, ry: 200, c: 'rgba(20,55,130,0.045)' },
+        { x: bgW * 0.22, y: bgH * 0.28, rx: 380, ry: 240, c: 'rgba(80,20,130,0.07)' },
+        { x: bgW * 0.78, y: bgH * 0.72, rx: 300, ry: 400, c: 'rgba(140,40,20,0.055)' },
+        { x: bgW * 0.60, y: bgH * 0.18, rx: 220, ry: 200, c: 'rgba(20,55,130,0.045)' },
       ];
     }
 
     function drawBg(ts: number) {
-      bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+      bgCtx.clearRect(0, 0, bgW, bgH);
       nebulae.forEach(n => {
         const mx = Math.max(n.rx, n.ry);
         const g = bgCtx.createRadialGradient(n.x, n.y, 0, n.x, n.y, mx);
@@ -96,10 +113,18 @@ export default function OrreryPage() {
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Cap at 3 — modern phones report DPR=3, and 3x is the practical limit
+    // where extra pixels still buy perceptible sharpness on a WebGL scene
+    // this small. Going higher is pure GPU cost.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
 
     function sizeRenderer() {
       const rect = oc.getBoundingClientRect();
+      // Guard against zero-sized layouts (e.g. hidden during initial paint).
+      if (rect.width === 0 || rect.height === 0) return;
+      // Keep pixel ratio in sync in case the user drags the window between
+      // retina and non-retina displays, or the system zoom level changes.
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
       renderer.setSize(rect.width, rect.height, false);
     }
     sizeRenderer();
@@ -136,9 +161,18 @@ export default function OrreryPage() {
     const texLoader = new THREE.TextureLoader();
     const loadedTextures: THREE.Texture[] = [];
     function loadTex(path: string, opts: { srgb?: boolean } = {}) {
-      const tex = texLoader.load(path);
+      const tex = texLoader.load(path, () => {
+        // Trigger a re-render as soon as the texture is available — without
+        // this the planet can pop in a frame late and look stale.
+        tex.needsUpdate = true;
+      });
       tex.colorSpace = opts.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
       tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      // Trilinear filtering + anisotropy — sharp up close, no shimmer at
+      // oblique angles (visible on Saturn's rings and thin crescents).
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = true;
       loadedTextures.push(tex);
       return tex;
     }
@@ -155,14 +189,17 @@ export default function OrreryPage() {
     // Glow sprites (radial gradients) around the sun
     function makeGlowTexture(stops: Array<[number, string]>): THREE.CanvasTexture {
       const cvs = document.createElement('canvas');
-      cvs.width = cvs.height = 256;
+      const SIZE = 1024;
+      cvs.width = cvs.height = SIZE;
       const c = cvs.getContext('2d')!;
-      const g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
+      const half = SIZE / 2;
+      const g = c.createRadialGradient(half, half, 0, half, half, half);
       stops.forEach(([t, color]) => g.addColorStop(t, color));
       c.fillStyle = g;
-      c.fillRect(0, 0, 256, 256);
+      c.fillRect(0, 0, SIZE, SIZE);
       const t = new THREE.CanvasTexture(cvs);
       t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
       loadedTextures.push(t);
       return t;
     }
