@@ -1,19 +1,27 @@
 import type { AstronomyEventSource } from "../engine/contracts.js";
 import type { AstronomyEventCandidate, ScoredAstronomyEvent } from "../domain/events.js";
-import type { PlaceCandidate, NearbyPlaceProvider, TravelTimeProvider } from "../domain/places.js";
 import type { RecommendationRequest } from "../domain/observer.js";
 import { scoreAstronomyEvent } from "../scoring/cool-score.js";
 import { assessVisibility } from "../scoring/visibility.js";
 import { normalizeEventCandidate } from "./normalize-event.js";
-import type { WeatherForecastHour, WeatherProvider } from "../providers/types.js";
+import type { WeatherForecast, WeatherForecastHour, WeatherProvider } from "../providers/types.js";
 
 const sortByScore = (left: ScoredAstronomyEvent, right: ScoredAstronomyEvent): number =>
-  right.finalScore - left.finalScore || right.coolScore - left.coolScore;
+  right.finalScore - left.finalScore ||
+  right.coolScore - left.coolScore ||
+  left.peakTime.getTime() - right.peakTime.getTime() ||
+  left.startTime.getTime() - right.startTime.getTime() ||
+  left.id.localeCompare(right.id);
+
+interface ForecastMatch {
+  point: WeatherForecastHour;
+  deltaMinutes: number;
+}
 
 const findNearestForecast = (
   event: AstronomyEventCandidate,
   forecastPoints: WeatherForecastHour[]
-): WeatherForecastHour | undefined => {
+): ForecastMatch | undefined => {
   const targetTime = event.peakTime.getTime();
   let best: WeatherForecastHour | undefined;
   let smallestDelta = Number.POSITIVE_INFINITY;
@@ -27,110 +35,76 @@ const findNearestForecast = (
     }
   }
 
-  return best;
+  if (!best) {
+    return undefined;
+  }
+
+  return {
+    point: best,
+    deltaMinutes: Math.round(smallestDelta / 60_000)
+  };
 };
 
 const applyForecast = (
   event: AstronomyEventCandidate,
-  forecast?: WeatherForecastHour
+  providerName?: string,
+  forecastMatch?: ForecastMatch
 ): AstronomyEventCandidate => {
-  if (!forecast) {
+  if (!forecastMatch) {
     return event;
   }
+
+  const { point: forecast, deltaMinutes } = forecastMatch;
 
   return {
     ...event,
     cloudCoverPct: event.cloudCoverPct ?? forecast.cloudCoverPct,
     lowCloudCoverPct: event.lowCloudCoverPct ?? forecast.cloudCoverLowPct,
+    cloudCoverMidPct: event.cloudCoverMidPct ?? forecast.cloudCoverMidPct,
+    cloudCoverHighPct: event.cloudCoverHighPct ?? forecast.cloudCoverHighPct,
     visibilityKm: event.visibilityKm ?? forecast.visibilityKm,
     windSpeedKph: event.windSpeedKph ?? forecast.windSpeedKph,
+    temperatureC: event.temperatureC ?? forecast.temperatureC,
     precipitationProbabilityPct:
       event.precipitationProbabilityPct ?? forecast.precipitationProbabilityPct,
+    weatherForecastTimeUtc: forecast.timeUtc,
+    weatherForecastProvider: providerName,
+    weatherForecastDeltaMinutes: deltaMinutes,
     seeingArcSeconds: event.seeingArcSeconds,
     transparencyMagnitudePerAirmass: event.transparencyMagnitudePerAirmass
   };
 };
 
-const applyPlaceRecommendation = (
-  event: AstronomyEventCandidate,
-  place?: PlaceCandidate,
-  travelTimeMinutes?: number,
-  distanceM?: number
-): AstronomyEventCandidate => {
-  if (!place) {
-    return event;
-  }
-
-  return {
-    ...event,
-    recommendedPlaceName: place.name,
-    recommendedPlaceLat: place.latitude,
-    recommendedPlaceLon: place.longitude,
-    travelTimeMinutes: event.travelTimeMinutes ?? travelTimeMinutes,
-    distanceM: event.distanceM ?? distanceM,
-    instructionText:
-      event.instructionText ??
-      (event.targetDirectionLabel
-        ? `Head to ${place.name}. Face ${event.targetDirectionLabel} and look up.`
-        : `Head to ${place.name} for a clearer view.`)
-  };
-};
-
-const prefersDarkSky = (eventType: AstronomyEventCandidate["eventType"]): boolean =>
-  eventType === "meteor_shower" || eventType === "aurora";
-
-const prefersOpenHorizon = (event: AstronomyEventCandidate): boolean =>
-  event.eventType === "lunar_eclipse" ||
-  event.eventType === "solar_eclipse" ||
-  event.eventType === "mercury_best_visibility" ||
-  event.eventType === "venus_best_visibility" ||
-  event.targetAltitudeDeg === undefined ||
-  event.targetAltitudeDeg < 12;
-
-const scorePlaceForEvent = (
-  place: PlaceCandidate,
-  event: AstronomyEventCandidate,
-  travelTimeMinutes?: number
-): number => {
-  const openness = place.directionOpennessScore ?? 55;
-  const elevation = Math.max(0, Math.min(100, (place.elevationM ?? 0) / 10));
-  const travel = travelTimeMinutes === undefined ? 70 : Math.max(10, 100 - travelTimeMinutes * 1.5);
-
-  let score = travel * 0.35 + elevation * 0.2 + openness * 0.25;
-
-  if (prefersOpenHorizon(event)) {
-    score += openness * 0.25;
-  }
-
-  if (place.placeType === "viewpoint" || place.placeType === "observation_deck") {
-    score += 8;
-  }
-
-  if (place.placeType === "national_park" && prefersDarkSky(event.eventType)) {
-    score += 10;
-  }
-
-  return score;
-};
-
 export interface RecommendationServiceDependencies {
   eventSource: AstronomyEventSource;
   weatherProvider?: WeatherProvider;
-  placeProvider?: NearbyPlaceProvider;
-  travelTimeProvider?: TravelTimeProvider;
-  candidatePlaceRadiusMeters?: number;
 }
 
-export class RecommendationService {
-  private readonly candidatePlaceRadiusMeters: number;
+export interface RecommendationBundle {
+  events: ScoredAstronomyEvent[];
+  forecast?: WeatherForecast;
+}
 
-  public constructor(private readonly deps: RecommendationServiceDependencies) {
-    this.candidatePlaceRadiusMeters = deps.candidatePlaceRadiusMeters ?? 30_000;
-  }
+const resolveLiveAnchor = (request: RecommendationRequest): Date =>
+  request.observer.liveAnchorTime ??
+  request.observer.snapshotTime ??
+  request.timeRange.start;
+
+export class RecommendationService {
+  public constructor(private readonly deps: RecommendationServiceDependencies) {}
 
   public async getRecommendations(
     request: RecommendationRequest
   ): Promise<ScoredAstronomyEvent[]> {
+    const bundle = await this.getRecommendationBundle(request);
+
+    return bundle.events;
+  }
+
+  public async getRecommendationBundle(
+    request: RecommendationRequest
+  ): Promise<RecommendationBundle> {
+    const liveAnchor = resolveLiveAnchor(request);
     const rawEvents = await this.deps.eventSource.generateEvents(
       request.observer,
       request.timeRange
@@ -147,91 +121,27 @@ export class RecommendationService {
 
     const enrichedWithWeather = rawEvents.map((event) =>
       normalizeEventCandidate(
-        applyForecast(event, findNearestForecast(event, forecast?.hours ?? []))
+        applyForecast(
+          event,
+          forecast?.provider,
+          findNearestForecast(event, forecast?.hours ?? [])
+        )
       )
     );
 
-    const maybePlaced = await this.attachPlaceRecommendations(
-      enrichedWithWeather,
-      request
-    );
-
-    const scored = maybePlaced
+    const scored = enrichedWithWeather
       .map((event) => {
         const visibility = assessVisibility(event);
 
         return scoreAstronomyEvent(event, visibility, request.observer);
       })
+      .filter((event) => event.endTime.getTime() >= liveAnchor.getTime())
       .filter((event) => request.includeSuppressed || !event.visibility.isSuppressed)
       .sort(sortByScore);
 
-    return request.maxResults ? scored.slice(0, request.maxResults) : scored;
-  }
-
-  private async attachPlaceRecommendations(
-    events: AstronomyEventCandidate[],
-    request: RecommendationRequest
-  ): Promise<AstronomyEventCandidate[]> {
-    if (!this.deps.placeProvider) {
-      return events;
-    }
-
-    const places = await this.deps.placeProvider.searchNearby(
-      request.observer,
-      this.candidatePlaceRadiusMeters
-    );
-
-    if (places.length === 0) {
-      return events;
-    }
-
-    const travelEstimates = this.deps.travelTimeProvider
-      ? await this.deps.travelTimeProvider.estimateTravelTimes(
-          request.observer,
-          places,
-          request.travelMode ?? "driving"
-        )
-      : [];
-
-    const travelByPlaceId = new Map(
-      travelEstimates.map((estimate) => [estimate.placeId, estimate] as const)
-    );
-    const maxTravelTimeMinutes = request.maxTravelTimeMinutes;
-    const candidatePlaces =
-      maxTravelTimeMinutes === undefined
-        ? places
-        : places.filter((place) => {
-            const estimate = travelByPlaceId.get(place.id);
-
-            return (
-              estimate !== undefined &&
-              estimate.travelTimeMinutes <= maxTravelTimeMinutes
-            );
-          });
-
-    if (candidatePlaces.length === 0) {
-      return events;
-    }
-
-    return events.map((event) => {
-      const rankedPlaces = [...candidatePlaces].sort((left, right) => {
-        const leftEstimate = travelByPlaceId.get(left.id);
-        const rightEstimate = travelByPlaceId.get(right.id);
-
-        return (
-          scorePlaceForEvent(right, event, rightEstimate?.travelTimeMinutes) -
-          scorePlaceForEvent(left, event, leftEstimate?.travelTimeMinutes)
-        );
-      });
-      const bestPlace = rankedPlaces[0];
-      const bestEstimate = travelByPlaceId.get(bestPlace.id);
-
-      return applyPlaceRecommendation(
-        event,
-        bestPlace,
-        bestEstimate?.travelTimeMinutes,
-        bestEstimate?.distanceM
-      );
-    });
+    return {
+      events: request.maxResults ? scored.slice(0, request.maxResults) : scored,
+      forecast
+    };
   }
 }

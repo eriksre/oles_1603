@@ -7,6 +7,12 @@ const sydneyObserver = {
   elevationM: 58
 };
 
+const miamiObserver = {
+  latitude: 25.7617,
+  longitude: -80.1918,
+  elevationM: 2
+};
+
 describe("LocalAstronomyEventSource", () => {
   it("derives full moons and lunar eclipses locally for a month window", async () => {
     const source = new LocalAstronomyEventSource({
@@ -115,5 +121,35 @@ describe("LocalAstronomyEventSource", () => {
     expect(closeApproach?.title).toContain("Moon with");
     expect(closeApproach?.targetAzimuthDeg).toBeDefined();
     expect(closeApproach?.targetDirectionLabel).toBeDefined();
+  });
+
+  it("keeps planet parade windows stable when the requested range shifts by a few minutes", async () => {
+    const source = new LocalAstronomyEventSource({
+      includeMoonEvents: false,
+      includeEclipses: false,
+      includeCloseApproaches: false,
+      includePlanetVisibilityEvents: false
+    });
+
+    const exactRangeEvents = await source.generateEvents(miamiObserver, {
+      start: new Date("2025-02-24T22:00:00Z"),
+      end: new Date("2025-03-03T22:00:00Z")
+    });
+    const shiftedRangeEvents = await source.generateEvents(miamiObserver, {
+      start: new Date("2025-02-24T22:05:00Z"),
+      end: new Date("2025-03-03T22:05:00Z")
+    });
+
+    const summarize = (events: typeof exactRangeEvents) =>
+      events
+        .filter((event) => event.eventType === "planet_parade")
+        .map((event) => ({
+          title: event.title,
+          startTime: event.startTime.toISOString(),
+          peakTime: event.peakTime.toISOString(),
+          endTime: event.endTime.toISOString()
+        }));
+
+    expect(summarize(shiftedRangeEvents)).toEqual(summarize(exactRangeEvents));
   });
 });

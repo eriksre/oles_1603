@@ -74,67 +74,58 @@ describe("OpenRouterClient", () => {
     expect(completion.choices[0]?.message?.content).toBe("A concise result");
   });
 
-  it("uses OpenRouter to choose between locations and parse JSON output", async () => {
+  it("asks the model to explain unfamiliar event names in plain language", async () => {
+    const requests: Array<{ body?: string }> = [];
     const client = new OpenRouterClient({
       apiKey: "test-key",
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        async json() {
-          return {
-            id: "chatcmpl_2",
-            model: "openai/gpt-5.4-mini",
-            choices: [
-              {
-                message: {
-                  role: "assistant",
-                  content: JSON.stringify({
-                    chosenLocationId: "place-b",
-                    chosenLocationName: "Coastal Headland",
-                    reason: "Best horizon and still within the drive cap.",
-                    confidence: 0.91
-                  })
+      fetchImpl: async (_url, init) => {
+        requests.push({ body: init?.body });
+
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          async json() {
+            return {
+              id: "chatcmpl_prompt",
+              model: "openai/gpt-5.4-mini",
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "A meteor shower appears after dark. Look toward the radiant for the best view."
+                  }
                 }
-              }
-            ]
-          };
-        },
-        async text() {
-          return "";
-        }
-      })
+              ]
+            };
+          },
+          async text() {
+            return "";
+          }
+        };
+      }
     });
 
-    const decision = await client.chooseBestLocation({
-      eventTitle: "Planet parade",
-      eventDescription: "Several planets visible low in the western sky.",
-      maxDriveMinutes: 20,
-      candidates: [
-        {
-          id: "place-a",
-          name: "City Park",
-          travelTimeMinutes: 6,
-          distanceMeters: 2500
-        },
-        {
-          id: "place-b",
-          name: "Coastal Headland",
-          travelTimeMinutes: 18,
-          distanceMeters: 16500
-        }
-      ]
+    await client.generateEventDescription({
+      eventTitle: "Lyrids peak",
+      eventSummary: "The Lyrids are a meteor shower with a radiant near Lyra.",
+      locationName: "your area"
     });
 
-    expect(decision).toEqual({
-      chosenLocationId: "place-b",
-      chosenLocationName: "Coastal Headland",
-      reason: "Best horizon and still within the drive cap.",
-      confidence: 0.91
-    });
+    const payload = JSON.parse(requests[0]?.body ?? "{}") as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+
+    expect(payload.messages?.[0]?.role).toBe("system");
+    expect(payload.messages?.[0]?.content).toContain(
+      "Assume the reader may not know the event name"
+    );
+    expect(payload.messages?.[1]?.content).toContain(
+      "Start by naming what kind of event this is in plain language if the title is obscure"
+    );
   });
 
-  it("generates a short event description", async () => {
+  it("generates a normalized two-sentence event description", async () => {
     const client = new OpenRouterClient({
       apiKey: "test-key",
       fetchImpl: async () => ({
@@ -149,7 +140,8 @@ describe("OpenRouterClient", () => {
               {
                 message: {
                   role: "assistant",
-                  content: "A bright lunar eclipse with a low eastern rise."
+                  content:
+                    "A bright lunar eclipse rises into the eastern sky. Totality makes the Moon glow a deep copper above the harbour."
                 }
               }
             ]
@@ -165,10 +157,91 @@ describe("OpenRouterClient", () => {
       client.generateEventDescription({
         eventTitle: "Total lunar eclipse",
         eventSummary: "The Moon passes through Earth's shadow.",
-        locationName: "Observatory Hill",
+        locationName: "your area",
         directionHint: "ESE",
         viewingNotes: "Low eastern horizon"
       })
-    ).resolves.toBe("A bright lunar eclipse with a low eastern rise.");
+    ).resolves.toBe(
+      "A bright lunar eclipse rises into the eastern sky. Totality makes the Moon glow a deep copper above the harbour."
+    );
+  });
+
+  it("pads a one-sentence model response into a two-sentence event description", async () => {
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            id: "chatcmpl_4",
+            model: "openai/gpt-5.4-mini",
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "Mars, Saturn, and Mercury line up low in the evening sky"
+                }
+              }
+            ]
+          };
+        },
+        async text() {
+          return "";
+        }
+      })
+    });
+
+    await expect(
+      client.generateEventDescription({
+        eventTitle: "Planet parade",
+        eventSummary: "Mars, Saturn, and Mercury are visible together.",
+        locationName: "your area",
+        directionHint: "ENE"
+      })
+    ).resolves.toBe(
+      "Mars, Saturn, and Mercury line up low in the evening sky. Look toward ENE for the best view."
+    );
+  });
+
+  it("removes specific location references from the model description before returning it", async () => {
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            id: "chatcmpl_5",
+            model: "openai/gpt-5.4-mini",
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content:
+                    "Look ENE, about 18° above the horizon, to spot Mars, Saturn, and Mercury together over Sydney."
+                }
+              }
+            ]
+          };
+        },
+        async text() {
+          return "";
+        }
+      })
+    });
+
+    await expect(
+      client.generateEventDescription({
+        eventTitle: "Planet parade",
+        eventSummary: "Mars, Saturn, and Mercury are visible together.",
+        locationName: "Sydney",
+        directionHint: "ENE"
+      })
+    ).resolves.toBe(
+      "Look ENE, about 18° above the horizon, to spot Mars, Saturn, and Mercury together. Look toward ENE for the best view."
+    );
   });
 });

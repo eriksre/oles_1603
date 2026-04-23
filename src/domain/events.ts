@@ -85,19 +85,20 @@ export interface AstronomyGeometry {
 export interface PracticalConditions {
   cloudCoverPct?: number;
   lowCloudCoverPct?: number;
+  cloudCoverMidPct?: number;
+  cloudCoverHighPct?: number;
   visibilityKm?: number;
   windSpeedKph?: number;
   precipitationProbabilityPct?: number;
+  temperatureC?: number;
+  weatherForecastTimeUtc?: string;
+  weatherForecastProvider?: string;
+  weatherForecastDeltaMinutes?: number;
   seeingArcSeconds?: number;
   transparencyMagnitudePerAirmass?: number;
 }
 
 export interface RecommendationFields {
-  distanceM?: number;
-  travelTimeMinutes?: number;
-  recommendedPlaceName?: string;
-  recommendedPlaceLat?: number;
-  recommendedPlaceLon?: number;
   instructionText?: string;
 }
 

@@ -31,6 +31,7 @@ type AstronomyObserver = InstanceType<typeof Observer>;
 import type { AstronomyEventCandidate } from "../../domain/events.js";
 import type { ObserverContext, TimeRange } from "../../domain/observer.js";
 import type { AstronomyEventSource } from "../../engine/contracts.js";
+import { ceilDateToInterval, floorDateToInterval } from "../../utils/stability.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -69,6 +70,14 @@ const CARDINAL_LABELS = [
   "NNW"
 ] as const;
 
+const BODY_LABELS = new Map<AstronomyBody, string>([
+  [Body.Mercury, "Mercury"],
+  [Body.Venus, "Venus"],
+  [Body.Mars, "Mars"],
+  [Body.Jupiter, "Jupiter"],
+  [Body.Saturn, "Saturn"]
+]);
+
 function clampAzimuth(azimuthDeg: number): number {
   const normalized = azimuthDeg % 360;
   return normalized < 0 ? normalized + 360 : normalized;
@@ -78,6 +87,24 @@ function toDirectionLabel(azimuthDeg: number): string {
   const normalized = clampAzimuth(azimuthDeg);
   const index = Math.round(normalized / 22.5) % CARDINAL_LABELS.length;
   return CARDINAL_LABELS[index];
+}
+
+function bodyLabel(body: AstronomyBody): string {
+  return BODY_LABELS.get(body) ?? String(body);
+}
+
+function formatPlanetList(bodies: readonly AstronomyBody[]): string {
+  const labels = [...new Set(bodies.map(bodyLabel))];
+
+  if (labels.length <= 1) {
+    return labels[0] ?? "bright planets";
+  }
+
+  if (labels.length === 2) {
+    return `${labels[0]} and ${labels[1]}`;
+  }
+
+  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
 }
 
 function toObserver(observer: ObserverContext): AstronomyObserver {
@@ -200,6 +227,33 @@ function instantVisibilityWindow(peakTime: Date, hours: number) {
   return {
     start: new Date(peakTime.getTime() - halfWindowMs),
     end: new Date(peakTime.getTime() + halfWindowMs)
+  };
+}
+
+function eventTimesFromVisibilityWindow(peakTime: Date, hours: number) {
+  const window = instantVisibilityWindow(peakTime, hours);
+
+  return {
+    startTime: window.start,
+    peakTime,
+    endTime: window.end
+  };
+}
+
+function buildAlignedSamplingWindow(
+  timeRange: TimeRange,
+  stepMs: number,
+  paddingSteps = 1
+) {
+  return {
+    start: floorDateToInterval(
+      new Date(timeRange.start.getTime() - paddingSteps * stepMs),
+      stepMs
+    ),
+    end: ceilDateToInterval(
+      new Date(timeRange.end.getTime() + paddingSteps * stepMs),
+      stepMs
+    )
   };
 }
 
@@ -336,9 +390,7 @@ function buildFullMoonEvents(
       const event = baseEvent({
           eventType,
           title: isSupermoon ? "Supermoon" : "Full moon",
-          startTime: quarter.time.date,
-          peakTime: quarter.time.date,
-          endTime: quarter.time.date,
+          ...eventTimesFromVisibilityWindow(quarter.time.date, visibilityWindowHours),
           ...geometry
         });
 
@@ -469,9 +521,7 @@ function buildMaxVisibilityEvents(
               : "venus_best_visibility",
           title: `${body} best ${event.visibility} visibility`,
           description: `${body} reaches maximum elongation and is best placed for viewing.`,
-          startTime: event.time.date,
-          peakTime: event.time.date,
-          endTime: event.time.date,
+          ...eventTimesFromVisibilityWindow(event.time.date, visibilityWindowHours),
           confidence: 0.86,
           ...geometry
         });
@@ -502,9 +552,7 @@ function buildMaxVisibilityEvents(
         eventType: "venus_best_visibility",
         title: "Venus near peak brightness",
         description: "Venus appears close to its brightest as seen from Earth.",
-        startTime: event.time.date,
-        peakTime: event.time.date,
-        endTime: event.time.date,
+        ...eventTimesFromVisibilityWindow(event.time.date, visibilityWindowHours),
         confidence: 0.9,
         ...geometry
       });
@@ -548,9 +596,7 @@ function buildPlanetOppositionEvents(
           eventType: "planet_opposition",
           title: `${body} at opposition`,
           description: `${body} is opposite the Sun in Earth's sky and is well placed for all-night viewing.`,
-          startTime: oppositionTime,
-          peakTime: oppositionTime,
-          endTime: oppositionTime,
+          ...eventTimesFromVisibilityWindow(oppositionTime, visibilityWindowHours),
           confidence: 0.9,
           ...geometry
         });
@@ -598,13 +644,14 @@ function buildCloseApproachEvents(
     }))
   ];
   const stepMs = 6 * HOUR_MS;
+  const samplingWindow = buildAlignedSamplingWindow(timeRange, stepMs);
 
   for (const config of searchConfigs) {
     const samples: Array<{ time: Date; separationDeg: number }> = [];
 
     for (
-      let timeMs = timeRange.start.getTime();
-      timeMs <= timeRange.end.getTime();
+      let timeMs = samplingWindow.start.getTime();
+      timeMs <= samplingWindow.end.getTime();
       timeMs += stepMs
     ) {
       const sampleTime = new Date(timeMs);
@@ -655,9 +702,7 @@ function buildCloseApproachEvents(
                 eventType: config.eventType,
                 title: config.title,
                 description: `${config.body1} and ${config.body2} make a close apparent approach.`,
-                startTime: refinedPeak,
-                peakTime: refinedPeak,
-                endTime: refinedPeak,
+                ...eventTimesFromVisibilityWindow(refinedPeak, visibilityWindowHours),
                 confidence: 0.88,
                 ...geometry
               });
@@ -702,6 +747,7 @@ function buildPlanetParades(
 ): AstronomyEventCandidate[] {
   const events: AstronomyEventCandidate[] = [];
   const stepMs = 30 * 60_000;
+  const samplingWindow = buildAlignedSamplingWindow(timeRange, stepMs);
   let active:
     | {
         start: Date;
@@ -711,74 +757,108 @@ function buildPlanetParades(
       }
     | undefined;
 
+  const flushActive = () => {
+    if (!active) {
+      return;
+    }
+
+    if (active.end.getTime() <= active.start.getTime()) {
+      active = undefined;
+      return;
+    }
+
+    const azimuths = active.peakBodies
+      .map((body) => body.geometry.targetAzimuthDeg)
+      .filter((value): value is number => value !== undefined);
+    const altitudes = active.peakBodies
+      .map((body) => body.geometry.targetAltitudeDeg)
+      .filter((value): value is number => value !== undefined);
+    const sortedPeakBodies = [...active.peakBodies].sort(
+      (left, right) =>
+        (left.geometry.targetAzimuthDeg ?? 0) - (right.geometry.targetAzimuthDeg ?? 0)
+    );
+    const representative = sortedPeakBodies[0]?.geometry;
+    const visiblePlanetNames = formatPlanetList(sortedPeakBodies.map((body) => body.body));
+
+    const event = baseEvent({
+      eventType: "planet_parade",
+      title: "Planet parade",
+      description: `${visiblePlanetNames} are visible together.`,
+      startTime: active.start,
+      peakTime: active.peak,
+      endTime: active.end,
+      confidence: 0.82,
+      targetAzimuthDeg: representative?.targetAzimuthDeg,
+      targetAltitudeDeg:
+        altitudes.length > 0
+          ? Math.max(...altitudes)
+          : representative?.targetAltitudeDeg,
+      targetDirectionLabel: representative?.targetDirectionLabel,
+      azimuthSpanStartDeg:
+        azimuths.length > 0 ? Math.min(...azimuths) : undefined,
+      azimuthSpanEndDeg:
+        azimuths.length > 0 ? Math.max(...azimuths) : undefined,
+      sunAltitudeDeg: representative?.sunAltitudeDeg,
+      moonAltitudeDeg: representative?.moonAltitudeDeg,
+      moonIllumination: representative?.moonIllumination
+    });
+
+    events.push({
+      ...event,
+      localBestViewingTime: event.peakTime,
+      localBestViewingAzimuthDeg: event.targetAzimuthDeg,
+      localBestViewingAltitudeDeg: event.targetAltitudeDeg,
+      localBestViewingDirectionLabel: event.targetDirectionLabel,
+      localBestViewingSunAltitudeDeg: event.sunAltitudeDeg,
+      localBestViewingMoonAltitudeDeg: event.moonAltitudeDeg,
+      localBestViewingMoonIllumination: event.moonIllumination
+    });
+
+    active = undefined;
+  };
+
   for (
-    let timeMs = timeRange.start.getTime();
-    timeMs <= timeRange.end.getTime();
+    let timeMs = samplingWindow.start.getTime();
+    timeMs <= samplingWindow.end.getTime();
     timeMs += stepMs
   ) {
     const sampleTime = new Date(timeMs);
+    const sampleWindowEnd = new Date(
+      Math.min(sampleTime.getTime() + stepMs, samplingWindow.end.getTime())
+    );
     const bodies = getVisiblePlanetsAtTime(observer, sampleTime, 10, -6);
+    const effectiveStart = new Date(
+      Math.max(sampleTime.getTime(), timeRange.start.getTime())
+    );
+    const effectiveEnd = new Date(
+      Math.min(sampleWindowEnd.getTime(), timeRange.end.getTime())
+    );
 
-    if (bodies.length >= 3) {
+    if (bodies.length >= 3 && effectiveEnd.getTime() > effectiveStart.getTime()) {
       if (!active) {
         active = {
-          start: sampleTime,
-          end: sampleTime,
-          peak: sampleTime,
+          start: effectiveStart,
+          end: effectiveEnd,
+          peak: effectiveStart,
           peakBodies: bodies
         };
       } else {
-        active.end = sampleTime;
-        if (bodies.length > active.peakBodies.length) {
+        active.end = effectiveEnd;
+        if (
+          sampleTime.getTime() >= timeRange.start.getTime() &&
+          sampleTime.getTime() <= timeRange.end.getTime() &&
+          bodies.length > active.peakBodies.length
+        ) {
           active.peak = sampleTime;
           active.peakBodies = bodies;
         }
       }
     } else if (active) {
-      const azimuths = active.peakBodies
-        .map((body) => body.geometry.targetAzimuthDeg)
-        .filter((value): value is number => value !== undefined);
-      const altitudes = active.peakBodies
-        .map((body) => body.geometry.targetAltitudeDeg)
-        .filter((value): value is number => value !== undefined);
-      const representative = active.peakBodies[0]?.geometry;
-
-      const event = baseEvent({
-          eventType: "planet_parade",
-          title: "Planet parade",
-          description: `Multiple bright planets are visible together.`,
-          startTime: active.start,
-          peakTime: active.peak,
-          endTime: active.end,
-          confidence: 0.82,
-          targetAzimuthDeg: representative?.targetAzimuthDeg,
-          targetAltitudeDeg:
-            altitudes.length > 0
-              ? Math.max(...altitudes)
-              : representative?.targetAltitudeDeg,
-          targetDirectionLabel: representative?.targetDirectionLabel,
-          azimuthSpanStartDeg:
-            azimuths.length > 0 ? Math.min(...azimuths) : undefined,
-          azimuthSpanEndDeg:
-            azimuths.length > 0 ? Math.max(...azimuths) : undefined,
-          sunAltitudeDeg: representative?.sunAltitudeDeg,
-          moonAltitudeDeg: representative?.moonAltitudeDeg,
-          moonIllumination: representative?.moonIllumination
-        });
-
-      events.push({
-        ...event,
-        localBestViewingTime: event.peakTime,
-        localBestViewingAzimuthDeg: event.targetAzimuthDeg,
-        localBestViewingAltitudeDeg: event.targetAltitudeDeg,
-        localBestViewingDirectionLabel: event.targetDirectionLabel,
-        localBestViewingSunAltitudeDeg: event.sunAltitudeDeg,
-        localBestViewingMoonAltitudeDeg: event.moonAltitudeDeg,
-        localBestViewingMoonIllumination: event.moonIllumination
-      });
-      active = undefined;
+      flushActive();
     }
   }
+
+  flushActive();
 
   return events;
 }

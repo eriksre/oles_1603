@@ -95,29 +95,7 @@ export const getWeatherScore = (
   return clampScore(100 - cloudPenalty - precipitationPenalty - visibilityPenalty);
 };
 
-export const getAccessibilityScore = (event: AstronomyEventCandidate): number => {
-  if (event.travelTimeMinutes === undefined) {
-    return 70;
-  }
-
-  if (event.travelTimeMinutes <= 10) {
-    return 100;
-  }
-
-  if (event.travelTimeMinutes <= 20) {
-    return 86;
-  }
-
-  if (event.travelTimeMinutes <= 40) {
-    return 68;
-  }
-
-  if (event.travelTimeMinutes <= 60) {
-    return 48;
-  }
-
-  return 28;
-};
+export const getAccessibilityScore = (): number => 70;
 
 export const buildScoreBreakdown = (
   event: AstronomyEventCandidate,
@@ -132,7 +110,7 @@ export const buildScoreBreakdown = (
     nakedEye: profile.nakedEye,
     timing: getTimingScore(event, observer),
     weather: getWeatherScore(event, visibility),
-    accessibility: getAccessibilityScore(event)
+    accessibility: getAccessibilityScore()
   };
 };
 

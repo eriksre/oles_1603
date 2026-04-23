@@ -1,4 +1,5 @@
 import type { WeatherForecast, WeatherForecastHour, WeatherForecastQuery, WeatherProvider } from "../types.js";
+import { MINUTE_MS, pruneExpiredEntries } from "../../utils/stability.js";
 
 export interface FetchLikeResponse {
   ok: boolean;
@@ -20,6 +21,7 @@ export interface OpenMeteoWeatherProviderOptions {
   fetchImpl?: FetchLike;
   baseUrl?: string;
   defaultTimezone?: string;
+  cacheTtlMs?: number;
 }
 
 export interface OpenMeteoHourlyPayload {
@@ -38,11 +40,16 @@ export interface OpenMeteoForecastResponse {
   latitude: number;
   longitude: number;
   timezone?: string;
+  utc_offset_seconds?: number;
   hourly_units?: Record<string, string>;
   hourly?: OpenMeteoHourlyPayload;
 }
 
 const DEFAULT_BASE_URL = "https://api.open-meteo.com/v1/forecast";
+const forecastCache = new Map<
+  string,
+  { expiresAt: number; value: Promise<WeatherForecast> }
+>();
 
 export function buildOpenMeteoForecastUrl(query: WeatherForecastQuery, baseUrl = DEFAULT_BASE_URL): URL {
   const url = new URL(baseUrl);
@@ -71,14 +78,37 @@ function toNullableNumber(value: number | null | undefined): number | undefined 
   return value == null ? undefined : value;
 }
 
-function buildHours(payload: OpenMeteoHourlyPayload): WeatherForecastHour[] {
+function openMeteoTimeToUtcIso(time: string, utcOffsetSeconds?: number): string {
+  if (time.endsWith("Z") || /[+-]\d\d:\d\d$/.test(time)) {
+    return new Date(time).toISOString();
+  }
+
+  if (utcOffsetSeconds === undefined) {
+    return time;
+  }
+
+  const [datePart, timePart = "00:00"] = time.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour = 0, minute = 0, second = 0] = timePart.split(":").map(Number);
+  const utcMs =
+    Date.UTC(year, month - 1, day, hour, minute, second) -
+    utcOffsetSeconds * 1000;
+
+  return new Date(utcMs).toISOString();
+}
+
+function metersToKilometers(value: number | undefined): number | undefined {
+  return value === undefined ? undefined : value / 1000;
+}
+
+function buildHours(payload: OpenMeteoHourlyPayload, utcOffsetSeconds?: number): WeatherForecastHour[] {
   return payload.time.map((timeUtc, index) => ({
-    timeUtc,
+    timeUtc: openMeteoTimeToUtcIso(timeUtc, utcOffsetSeconds),
     cloudCoverPct: toNullableNumber(payload.cloud_cover?.[index]),
     cloudCoverLowPct: toNullableNumber(payload.cloud_cover_low?.[index]),
     cloudCoverMidPct: toNullableNumber(payload.cloud_cover_mid?.[index]),
     cloudCoverHighPct: toNullableNumber(payload.cloud_cover_high?.[index]),
-    visibilityKm: toNullableNumber(payload.visibility?.[index]),
+    visibilityKm: metersToKilometers(toNullableNumber(payload.visibility?.[index])),
     precipitationProbabilityPct: toNullableNumber(payload.precipitation_probability?.[index]),
     windSpeedKph: toNullableNumber(payload.wind_speed_10m?.[index]),
     temperatureC: toNullableNumber(payload.temperature_2m?.[index])
@@ -93,7 +123,7 @@ export function normalizeOpenMeteoForecast(response: OpenMeteoForecastResponse):
     latitude: response.latitude,
     longitude: response.longitude,
     timezone: response.timezone ?? "auto",
-    hours: buildHours(hourly),
+    hours: buildHours(hourly, response.utc_offset_seconds),
     raw: response
   };
 }
@@ -104,6 +134,7 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
   private readonly fetchImpl: FetchLike;
   private readonly baseUrl: string;
   private readonly defaultTimezone: string;
+  private readonly cacheTtlMs: number;
 
   constructor(options: OpenMeteoWeatherProviderOptions = {}) {
     const defaultFetch = (globalThis as unknown as { fetch?: FetchLike }).fetch;
@@ -118,6 +149,7 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
       });
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.defaultTimezone = options.defaultTimezone ?? "auto";
+    this.cacheTtlMs = options.cacheTtlMs ?? 30 * MINUTE_MS;
   }
 
   async getForecast(query: WeatherForecastQuery): Promise<WeatherForecast> {
@@ -128,19 +160,41 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
       },
       this.baseUrl
     );
+    const cacheKey = url.toString();
+    const nowMs = Date.now();
+    pruneExpiredEntries(forecastCache, nowMs);
+    const cached = forecastCache.get(cacheKey);
 
-    const response = await this.fetchImpl(url.toString(), {
+    if (cached) {
+      return cached.value;
+    }
+
+    const request = this.fetchImpl(cacheKey, {
       headers: {
         accept: "application/json"
       }
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(
+            `Open-Meteo request failed with ${response.status} ${response.statusText}: ${body}`
+          );
+        }
+
+        const payload = (await response.json()) as OpenMeteoForecastResponse;
+        return normalizeOpenMeteoForecast(payload);
+      })
+      .catch((error) => {
+        forecastCache.delete(cacheKey);
+        throw error;
+      });
+
+    forecastCache.set(cacheKey, {
+      expiresAt: nowMs + this.cacheTtlMs,
+      value: request
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Open-Meteo request failed with ${response.status} ${response.statusText}: ${body}`);
-    }
-
-    const payload = (await response.json()) as OpenMeteoForecastResponse;
-    return normalizeOpenMeteoForecast(payload);
+    return request;
   }
 }

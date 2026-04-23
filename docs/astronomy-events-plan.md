@@ -20,14 +20,13 @@ The product has three layers:
 
 The user experience should reduce to a simple recommendation such as:
 
-`Blood moon tonight at 7:18 PM. Best viewing spot is Observatory Hill. Face 102 deg ESE and look 8 deg above the horizon. Cool score: 91.`
+`Blood moon tonight at 7:18 PM. Face 102 deg ESE and look 8 deg above the horizon. Cool score: 91.`
 
 The LLM is not the astronomy source of truth.
 
 - The event engine decides what event exists and when it happens.
-- The maps provider decides what places are reachable within the drive cap.
 - The weather provider decides whether conditions are usable.
-- OpenRouter with `gpt-5.4-mini` decides between close candidate places and writes the short event description shown to the user.
+- OpenRouter with `gpt-5.4-mini` writes the short event description shown to the user.
 
 ## Design Principles
 
@@ -92,16 +91,14 @@ These should come from external sources because they are dynamic or operational.
 - Aurora activity
 - Satellite / ISS passes
 - Weather and cloud forecast
-- Places, routing, and geocoding
-- LLM-assisted location choice and event description
+- LLM-assisted event description
 
 Recommended sources:
 
 - Aurora: [NOAA SWPC Aurora 30-minute Forecast](https://www.swpc.noaa.gov/products/aurora-30-minute-forecast) and [Aurora Viewline Tonight and Tomorrow Night](https://www.swpc.noaa.gov/products/aurora-viewline-tonight-and-tomorrow-night-experimental). Also [NASA DONKI API](https://api.nasa.gov/) for geomagnetic storm and solar flare alerts (free, REST).
 - ISS passes: [N2YO API](https://www.n2yo.com/api/) — free account required, 100 visual pass queries/hr. Provides rise/peak/set azimuth and altitude directly. **Note: the OpenNotify ISS pass endpoint (`/iss-pass.json`) was removed in 2020 and no longer works.**
 - Weather: [Open-Meteo](https://open-meteo.com/en/docs) for cloud cover, [7Timer! ASTRO](http://7timer.info/doc.php?lang=en#astro) for seeing and atmospheric transparency
-- Maps and routing: Google Maps Platform for candidate places plus drive-time filtering
-- LLM: [OpenRouter](https://openrouter.ai/) with `gpt-5.4-mini` for location tie-breaking and event copy
+- LLM: [OpenRouter](https://openrouter.ai/) with `gpt-5.4-mini` for event copy
 
 ## Recommended MVP Event Catalog
 
@@ -243,20 +240,11 @@ Rules of thumb:
 - Meteor showers and aurora depend heavily on total cloud cover and darkness.
 - Bright planets and the Moon can tolerate moderate haze or partial cloud.
 
-### Step 4: Place Selection
+### Step 4: User-Facing Description
 
-This is the place-selection problem.
+For the MVP, use the observer's own location for all event geometry and weather context. Do not search for alternate viewing spots or route users elsewhere.
 
-For the MVP, use heuristics:
-
-- Search candidate places from a maps API around the user.
-- Compute drive time for each candidate and discard anything above the travel cap.
-- Prefer places with a clearer horizon for low-altitude events.
-- Prefer places that are faster to reach when multiple candidates are otherwise similar.
-- Treat the default MVP cap as `20 minutes driving`.
-- If two candidates are close, use OpenRouter to choose the better one and produce the final human-readable description.
-
-Later, this can be improved with terrain horizon profiling: sample DEM elevation at N points along the target azimuth from the candidate location and compute the actual horizon angle in that direction. This tells you whether a hill or building is blocking a low-altitude event from that specific spot.
+OpenRouter can produce the final human-readable description, but it should describe what is visible near the user and where to look in the sky.
 
 ## Azimuth and Direction Model
 
@@ -299,39 +287,6 @@ For these, store:
 - `azimuth_span_start_deg`
 - `azimuth_span_end_deg`
 - a user-facing summary like `Look from WSW through S`
-
-## Place Recommendation Model
-
-The system should evaluate nearby candidate places and pick the one that best balances viewing quality and convenience.
-
-### Candidate Place Types
-
-Use the maps provider to search for candidate places like:
-
-- viewpoint / lookout
-- observation deck
-- park
-- beach
-- other obvious open-sky public spots
-
-### Place Ranking Inputs
-
-Each candidate place should be scored using:
-
-- travel time from user
-- distance
-- place type
-- openness heuristic for target azimuth
-- local weather at that point if available
-
-### Example Heuristics
-
-- For moonrise, sunrise-adjacent events, or low-altitude eclipses:
-  - strongly prefer east- or west-open horizon places
-- For planets high in the sky:
-  - travel time matters more than open horizon
-- In all cases:
-  - do not recommend any place beyond the configured drive-time cap
 
 ## Cool Scale
 
@@ -418,23 +373,6 @@ Useful weather fields:
 
 ### Maps and Location
 
-**Primary maps stack:** Google Maps Platform.
-
-Use:
-
-- Places API to search nearby viewpoints, lookouts, parks, beaches, and observation decks
-- Routes API to calculate drive time from the user to each candidate place
-- Geocoding if we need manual search or reverse-geocoded labels
-
-The key product rule is:
-
-- Search candidate places around the user
-- Calculate drive time for each
-- Keep only places reachable within `20 minutes driving`
-- Rank the remaining places by travel time plus viewing suitability for the event direction
-
-Map display can still use any normal frontend mapping library later. That is separate from the backend place-selection logic.
-
 ### Notifications
 
 - Browser geolocation via the [Geolocation API](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API)
@@ -449,16 +387,15 @@ Map display can still use any normal frontend mapping library later. That is sep
 - Mobile-first web app
 - Browser location permission with manual location fallback
 - Event list sorted by `final_score`
-- Event detail page with time, direction, and travel recommendation
+- Event detail page with time and direction
 
 ### Backend
 
 - Next.js app on Vercel
 - API routes or server actions for event queries
-- an `events API` that composes event generation, weather, and maps routing
+- an `events API` that composes event generation and weather for the user's location
 - a `weather API` connection for cloud/visibility data
-- a `maps API` connection for candidate places and drive-time filtering
-- an `LLM API` connection via OpenRouter for location tie-breaking and event description
+- an `LLM API` connection via OpenRouter for event description
 - Scheduled background jobs for refreshing external feeds and curated event windows
 
 ### Data Layers
@@ -466,7 +403,6 @@ Map display can still use any normal frontend mapping library later. That is sep
 - Derived event calculators
 - Curated event JSON for meteor showers
 - Weather fetchers
-- Maps / route fetchers
 - Event scoring engine
 
 ## Recommended Implementation Order
@@ -498,18 +434,16 @@ Output:
 
 - events the user can likely see
 
-### Phase 3: Place Recommendation
+### Phase 3: Event Description
 
 Add:
 
-- maps place search
-- route-time filtering with a `20 minute drive` cap
-- direction-aware place filtering
-- candidate ranking for the best reachable place
+- LLM-generated display copy
+- concise direction-aware viewing guidance
 
 Output:
 
-- events plus recommended places
+- events plus readable descriptions
 
 ### Phase 4: Alerts and Product Polish
 
@@ -532,26 +466,19 @@ The MVP is successful if a user can:
 2. provide their location
 3. see at least one upcoming event worth considering
 4. understand exactly when and where to look
-5. optionally get a better nearby viewing recommendation
 
 ## MVP Required APIs
 
-The MVP backend must have these three integrations:
+The MVP backend must have these integrations:
 
 1. `Events API`
    - backed by local event generation using Astronomy Engine
    - returns normalized event candidates for a place and time range
 2. `Weather API`
-   - cloud and visibility forecast for the observer and optionally candidate places
-3. `Maps API`
-   - candidate place search
-   - drive-time calculation
-   - filter to places reachable within `20 minutes driving`
-
-4. `LLM API`
+   - cloud and visibility forecast for the observer
+3. `LLM API`
    - OpenRouter as the provider
    - `gpt-5.4-mini` as the default model
-   - chooses between close candidate locations
    - writes the short event description shown to the user
 
 ## API Reference Summary
@@ -563,15 +490,13 @@ The MVP backend must have these three integrations:
 | 7Timer! ASTRO | Seeing, atmospheric transparency | Free, no documented cap | No |
 | NASA DONKI | Space weather, aurora triggers, solar flares | Free, 1,000/hr | Free signup |
 | N2YO API | ISS and satellite pass predictions | Free, 100 visual/hr | Free signup |
-| Google Maps Platform | Places search, routing, geocoding, drive-time filtering | Paid | GCP key |
-| OpenRouter | LLM tie-breaking and event description generation | Paid | API key |
+| OpenRouter | Event description generation | Paid | API key |
 
 For the actual MVP path, the required stack is:
 
 - Astronomy Engine for event generation
 - Open-Meteo for weather
-- Google Maps Platform for place search plus route-time filtering
-- OpenRouter for location choice and the short user-facing description
+- OpenRouter for the short user-facing description
 
 ## Risks and Constraints
 

@@ -29,13 +29,14 @@ describe("open-meteo weather provider", () => {
       latitude: -33.9,
       longitude: 151.2,
       timezone: "Australia/Sydney",
+      utc_offset_seconds: 36000,
       hourly: {
         time: ["2026-03-27T00:00", "2026-03-27T01:00"],
         cloud_cover: [12, 40],
         cloud_cover_low: [5, null],
         cloud_cover_mid: [11, 30],
         cloud_cover_high: [3, 7],
-        visibility: [24, 14],
+        visibility: [24_000, 14_000],
         precipitation_probability: [0, 15],
         wind_speed_10m: [8, 19],
         temperature_2m: [19, 18],
@@ -49,7 +50,7 @@ describe("open-meteo weather provider", () => {
       timezone: "Australia/Sydney",
       hours: [
         {
-          timeUtc: "2026-03-27T00:00",
+          timeUtc: "2026-03-26T14:00:00.000Z",
           cloudCoverPct: 12,
           cloudCoverLowPct: 5,
           cloudCoverMidPct: 11,
@@ -60,7 +61,7 @@ describe("open-meteo weather provider", () => {
           temperatureC: 19,
         },
         {
-          timeUtc: "2026-03-27T01:00",
+          timeUtc: "2026-03-26T15:00:00.000Z",
           cloudCoverPct: 40,
           cloudCoverLowPct: undefined,
           cloudCoverMidPct: 30,

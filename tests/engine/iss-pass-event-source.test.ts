@@ -66,7 +66,50 @@ describe("IssPassEventSource", () => {
       sourceName: "celestrak-gp-omm",
       peakTime: new Date("2026-04-18T09:40:20Z")
     });
+    expect(events[0].description).toContain("watch for the ISS for");
+    expect(events[0].description).not.toContain("passes overhead");
     expect(events[0].localBestViewingAltitudeDeg).toBeGreaterThan(80);
     expect(events[0].localBestViewingSunAltitudeDeg).toBeLessThanOrEqual(-6);
+  });
+
+  it("keeps the same ISS pass when the live anchor shifts a few minutes", async () => {
+    const source = new IssPassEventSource({
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => issOmmPayload,
+        text: async () => ""
+      }),
+      sampleSeconds: 20
+    });
+
+    const baseObserver = {
+      latitude: 40.7128,
+      longitude: -74.006,
+      elevationM: 10
+    };
+    const timeRange = {
+      start: new Date("2026-04-18T00:00:00Z"),
+      end: new Date("2026-04-19T00:00:00Z")
+    };
+
+    const firstEvents = await source.generateEvents(
+      {
+        ...baseObserver,
+        liveAnchorTime: new Date("2026-04-18T09:30:00Z")
+      },
+      timeRange
+    );
+    const secondEvents = await source.generateEvents(
+      {
+        ...baseObserver,
+        liveAnchorTime: new Date("2026-04-18T09:35:00Z")
+      },
+      timeRange
+    );
+
+    expect(firstEvents[0]?.peakTime.toISOString()).toBe("2026-04-18T09:40:20.000Z");
+    expect(secondEvents[0]?.peakTime.toISOString()).toBe("2026-04-18T09:40:20.000Z");
   });
 });

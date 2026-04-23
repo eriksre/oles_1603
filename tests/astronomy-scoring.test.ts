@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseEvent, baseObserver, basePlace, baseWeather } from "./helpers/astronomy-fixtures";
+import { baseEvent, baseObserver, baseWeather } from "./helpers/astronomy-fixtures";
 import { loadRequiredModule } from "./helpers/load-required-module";
 
 const scoringModulePath: string = "../../src/domain/scoring";
@@ -19,7 +19,6 @@ describe("astronomy scoring", () => {
       }),
       observer: baseObserver(),
       weather: baseWeather(),
-      place: basePlace(),
     });
 
     const fullMoon = scoreAstronomyEvent({
@@ -31,7 +30,6 @@ describe("astronomy scoring", () => {
       }),
       observer: baseObserver(),
       weather: baseWeather(),
-      place: basePlace(),
     });
 
     expect(eclipse.coolScore).toBeGreaterThan(fullMoon.coolScore);
@@ -53,7 +51,6 @@ describe("astronomy scoring", () => {
       }),
       observer: baseObserver(),
       weather: baseWeather({ cloudCoverPct: 8, lowCloudCoverPct: 5 }),
-      place: basePlace({ darkSkyScore: 90 }),
     });
 
     const cloudyMeteor = scoreAstronomyEvent({
@@ -66,7 +63,6 @@ describe("astronomy scoring", () => {
       }),
       observer: baseObserver(),
       weather: baseWeather({ cloudCoverPct: 88, lowCloudCoverPct: 80 }),
-      place: basePlace({ darkSkyScore: 90 }),
     });
 
     expect(clearMeteor.finalScore).toBeGreaterThan(cloudyMeteor.finalScore);
@@ -87,7 +83,6 @@ describe("astronomy scoring", () => {
       }),
       observer: baseObserver(),
       weather: baseWeather({ cloudCoverPct: 15, lowCloudCoverPct: 12 }),
-      place: basePlace({ travelTimeMinutes: 24 }),
       sky: {
         sunAltitudeDeg: -1.5,
         moonAltitudeDeg: 42,

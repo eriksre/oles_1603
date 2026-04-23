@@ -4,6 +4,9 @@ export interface ObserverContext {
   elevationM?: number;
   timezoneOffsetMinutes?: number;
   locationLabel?: string;
+  snapshotTime?: Date;
+  liveAnchorTime?: Date;
+  calendarAnchorTime?: Date;
 }
 
 export interface TimeRange {
@@ -11,13 +14,9 @@ export interface TimeRange {
   end: Date;
 }
 
-export type TravelMode = "walking" | "cycling" | "driving";
-
 export interface RecommendationRequest {
   observer: ObserverContext;
   timeRange: TimeRange;
-  travelMode?: TravelMode;
-  maxTravelTimeMinutes?: number;
   includeSuppressed?: boolean;
   maxResults?: number;
 }

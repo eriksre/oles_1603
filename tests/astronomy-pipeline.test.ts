@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { baseEvent, baseObserver, basePlace, baseWeather } from "./helpers/astronomy-fixtures";
+import { baseEvent, baseObserver, baseWeather } from "./helpers/astronomy-fixtures";
 import { loadRequiredModule } from "./helpers/load-required-module";
 
 const pipelineModulePath: string = "../../src/pipeline/recommend-events";
@@ -29,11 +29,6 @@ describe("astronomy recommendation pipeline", () => {
     ]);
 
     const weather = vi.fn().mockResolvedValue(baseWeather({ cloudCoverPct: 14, lowCloudCoverPct: 10 }));
-    const places = vi.fn().mockResolvedValue([
-      basePlace({ id: "viewpoint-1", name: "Observatory Hill", travelTimeMinutes: 8, openHorizonScore: 95 }),
-      basePlace({ id: "viewpoint-2", name: "Harbour Foreshore", travelTimeMinutes: 14, openHorizonScore: 68 }),
-    ]);
-
     const result = await buildAstronomyRecommendations({
       observer: baseObserver(),
       timeRange: {
@@ -43,23 +38,20 @@ describe("astronomy recommendation pipeline", () => {
       providers: {
         engine,
         weather,
-        places,
       },
     });
 
     expect(engine).toHaveBeenCalledTimes(1);
     expect(weather).toHaveBeenCalledTimes(1);
-    expect(places).toHaveBeenCalledTimes(1);
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({
       id: "event-visible",
       visible: true,
       suppressed: false,
-      recommendedPlaceName: "Observatory Hill",
     });
   });
 
-  it("prefers the best place when multiple candidate viewpoints are available", async () => {
+  it("builds sky-facing instructions without candidate viewing places", async () => {
     const { buildAstronomyRecommendations } = await loadRequiredModule(
       pipelineModulePath,
       "astronomy recommendation pipeline",
@@ -84,27 +76,11 @@ describe("astronomy recommendation pipeline", () => {
           }),
         ]),
         weather: vi.fn().mockResolvedValue(baseWeather({ cloudCoverPct: 6, lowCloudCoverPct: 4 })),
-        places: vi.fn().mockResolvedValue([
-          basePlace({
-            id: "place-a",
-            name: "City Park",
-            travelTimeMinutes: 3,
-            openHorizonScore: 41,
-            darkSkyScore: 15,
-          }),
-          basePlace({
-            id: "place-b",
-            name: "Coastal Headland",
-            travelTimeMinutes: 19,
-            openHorizonScore: 93,
-            darkSkyScore: 67,
-          }),
-        ]),
       },
     });
 
-    expect(result.events[0]?.recommendedPlaceName).toBe("Coastal Headland");
-    expect(result.events[0]?.instructionText).toContain("Look");
+    expect(result.events[0]).not.toHaveProperty("recommendedPlaceName");
+    expect(result.events[0]?.instructionText).toBe("Look across azimuth 268 to 332 degrees.");
   });
 
   it("surfaces the contract shape needed by the UI without mixing concerns", async () => {
@@ -122,7 +98,6 @@ describe("astronomy recommendation pipeline", () => {
       providers: {
         engine: vi.fn().mockResolvedValue([]),
         weather: vi.fn().mockResolvedValue(baseWeather()),
-        places: vi.fn().mockResolvedValue([]),
       },
     });
 

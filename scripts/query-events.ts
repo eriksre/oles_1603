@@ -8,6 +8,7 @@ import { EVENT_TYPES } from "../src/domain/events.ts";
 import { LocalAstronomyEventSource } from "../src/providers/astronomy/localAstronomyEventSource.ts";
 
 const SOURCE_TYPES = ["all", "local", "meteor", "aurora", "iss"] as const;
+const DEFAULT_QUERY_DAYS = 7;
 
 type QuerySource = (typeof SOURCE_TYPES)[number];
 
@@ -32,18 +33,18 @@ interface CliOptions {
 const usage = `Query raw astronomy event candidates.
 
 Usage:
-  npm run events:all -- --date 2025-03-01 --days 31 --lat -33.8688 --lon 151.2093 --place "Sydney"
-  npm run events:local -- --date 2024-12-01 --days 15 --lat -33.8688 --lon 151.2093 --types planet_opposition
-  npm run events:meteor -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093
-  npm run events:aurora -- --date 2026-04-17 --days 1 --lat 64.1466 --lon -21.9426 --place "Reykjavik"
-  npm run events:iss -- --date 2026-04-17 --days 3 --lat -33.8688 --lon 151.2093 --place "Sydney"
+  npm run events:all -- --lat -33.8688 --lon 151.2093 --place "Sydney"
+  npm run events:local -- --lat -33.8688 --lon 151.2093 --types planet_opposition
+  npm run events:meteor -- --lat -33.8688 --lon 151.2093
+  npm run events:aurora -- --lat -42.8821 --lon 147.3272 --place "Hobart"
+  npm run events:iss -- --lat -33.8688 --lon 151.2093 --place "Sydney"
 
 Options:
   --source all|local|meteor|aurora|iss
                            Source to query. Package scripts set this automatically.
-  --date YYYY-MM-DD|ISO    Start date/time. Date-only values start at 00:00 UTC.
+  --date YYYY-MM-DD|ISO    Optional start date/time. Defaults to now.
   --end YYYY-MM-DD|ISO     End date/time. Date-only values end at 23:59:59.999 UTC.
-  --days N                 Number of days from --date when --end is omitted. Default: 14.
+  --days N                 Number of days from --date or now when --end is omitted. Default: 7.
   --lat N                  Observer latitude.
   --lon N                  Observer longitude.
   --elevation N            Observer elevation in meters.
@@ -124,7 +125,7 @@ function parseSource(value: string | undefined): QuerySource {
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     source: "all",
-    days: 14,
+    days: DEFAULT_QUERY_DAYS,
     json: false,
     nativeOnly: false,
     includeBelowHorizon: false,
@@ -194,10 +195,6 @@ function parseArgs(argv: string[]): CliOptions {
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
-  }
-
-  if (!options.date) {
-    throw new Error("Missing --date.");
   }
 
   if (options.latitude === undefined || options.longitude === undefined) {
@@ -302,7 +299,7 @@ function printSummary(options: CliOptions, start: Date, end: Date, count: number
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const start = parseDate(options.date, "--date");
+  const start = options.date ? parseDate(options.date, "--date") : new Date();
   const end = options.end
     ? parseDate(options.end, "--end", true)
     : new Date(start.getTime() + options.days * 24 * 60 * 60 * 1000 - 1);

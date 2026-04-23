@@ -43,19 +43,6 @@ interface RawWeather {
   windSpeedKph: number;
 }
 
-interface RawPlace {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  elevationM: number;
-  distanceM: number;
-  travelTimeMinutes: number;
-  placeType: string;
-  openHorizonScore: number;
-  darkSkyScore: number;
-}
-
 interface RawSky {
   sunAltitudeDeg?: number;
   moonAltitudeDeg?: number;
@@ -137,7 +124,6 @@ export function scoreAstronomyEvent(input: {
   event: RawAstronomyEvent;
   observer: RawObserver;
   weather: RawWeather;
-  place: RawPlace;
   sky?: RawSky;
 }): WrapperScoredEvent {
   const visibility = classifyAstronomicalVisibility({
@@ -160,7 +146,6 @@ export function scoreAstronomyEvent(input: {
     weatherPenalty *= 1.25;
   }
 
-  const travelPenalty = Math.max(0, input.place.travelTimeMinutes - 10) * 1.5;
   const twilightPenalty =
     suppressionReasons.includes(
       "sun altitude is too bright for a subtle low-altitude event"
@@ -174,7 +159,7 @@ export function scoreAstronomyEvent(input: {
     BASELINE_COOL[input.event.eventType] + confidenceBonus - weatherPenalty * 0.15
   );
   const finalScore = clampScore(
-    coolScore - weatherPenalty * 0.45 - travelPenalty - twilightPenalty - horizonPenalty
+    coolScore - weatherPenalty * 0.45 - twilightPenalty - horizonPenalty
   );
 
   return {

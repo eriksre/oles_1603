@@ -1,21 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Cormorant_Garamond, Space_Mono } from "next/font/google";
+import { Orbitron, Sora } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
 
-const cormorantGaramond = Cormorant_Garamond({
+const orbitron = Orbitron({
   subsets: ["latin"],
-  weight: ["300", "400"],
-  style: ["normal", "italic"],
-  variable: "--font-cormorant-garamond",
-  display: "swap"
+  display: "swap",
+  variable: "--font-orbitron",
 });
 
-const spaceMono = Space_Mono({
+const sora = Sora({
   subsets: ["latin"],
-  weight: "400",
-  variable: "--font-space-mono",
-  display: "swap"
+  display: "swap",
+  variable: "--font-sora",
 });
 
 export const metadata: Metadata = {
@@ -33,10 +30,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${cormorantGaramond.variable} ${spaceMono.variable}`}
-        suppressHydrationWarning
-      >
+      <body className={`${orbitron.variable} ${sora.variable}`} suppressHydrationWarning>
         {children}
       </body>
     </html>

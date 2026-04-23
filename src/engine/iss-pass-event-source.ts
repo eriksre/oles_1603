@@ -17,6 +17,12 @@ import type { ObserverContext, TimeRange } from "../domain/observer.js";
 import type { AstronomyEventSource } from "./contracts.js";
 import { azimuthToDirectionLabel, normalizeDegrees } from "../utils/direction.js";
 import { getLocalSkyContext } from "../utils/observer-sky.js";
+import {
+  MINUTE_MS,
+  ceilDateToInterval,
+  floorDateToInterval,
+  pruneExpiredEntries
+} from "../utils/stability.js";
 
 export interface FetchLikeResponse {
   ok: boolean;
@@ -44,6 +50,8 @@ export interface IssPassEventSourceOptions {
   minPeakElevationDeg?: number;
   minDurationSeconds?: number;
   maxPropagationDaysFromEpoch?: number;
+  lookbackMinutes?: number;
+  elementsCacheTtlMs?: number;
 }
 
 interface IssSample {
@@ -70,6 +78,10 @@ const DEFAULT_ISS_OMM_URL =
   "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=JSON";
 const SECOND_MS = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const issElementsCache = new Map<
+  string,
+  { expiresAt: number; value: Promise<LoadedIssElements> }
+>();
 
 function parseEpoch(epoch: string | undefined): Date {
   if (!epoch) {
@@ -150,6 +162,35 @@ function choosePeakSample(samples: readonly IssSample[]): IssSample {
   )[0];
 }
 
+function formatDurationLabel(durationSeconds: number): string {
+  const roundedMinutes = Math.max(1, Math.round(durationSeconds / 60));
+
+  return roundedMinutes === 1
+    ? "about 1 minute"
+    : `about ${roundedMinutes} minutes`;
+}
+
+function buildPassDescription(input: {
+  durationSeconds: number;
+  peakAltitudeDeg: number;
+  startDirection: string;
+  endDirection: string;
+  peakTime: Date;
+  endTime: Date;
+}): string {
+  const peakAltitudeDeg = Math.round(input.peakAltitudeDeg);
+  const fadeAfterPeakSeconds =
+    (input.endTime.getTime() - input.peakTime.getTime()) / SECOND_MS;
+  const fadeClause =
+    fadeAfterPeakSeconds <= 45
+      ? `It reaches its highest point about ${peakAltitudeDeg} degrees above the horizon right before fading from view toward ${input.endDirection}.`
+      : `It reaches its highest point about ${peakAltitudeDeg} degrees above the horizon, then fades toward ${input.endDirection}.`;
+
+  return `Look toward ${input.startDirection} shortly after the pass begins and watch for the ISS for ${formatDurationLabel(
+    input.durationSeconds
+  )}. ${fadeClause}`;
+}
+
 function passToEvent(
   pass: ActivePass,
   objectName: string,
@@ -174,11 +215,14 @@ function passToEvent(
     id: `iss-pass-${peakIso.replace(/[-:.]/g, "")}`,
     eventType: "iss_pass",
     title: "ISS visible pass",
-    description: `${objectName} passes overhead for ${Math.round(
-      durationSeconds / 60
-    )} minutes, peaking ${Math.round(
-      peak.altitudeDeg
-    )} degrees above the horizon. Appears ${startDirection}, disappears ${endDirection}.`,
+    description: buildPassDescription({
+      durationSeconds,
+      peakAltitudeDeg: peak.altitudeDeg,
+      startDirection,
+      endDirection,
+      peakTime: peak.time,
+      endTime: end.time
+    }),
     startTime: start.time,
     peakTime: peak.time,
     endTime: end.time,
@@ -210,6 +254,8 @@ export class IssPassEventSource implements AstronomyEventSource {
   private readonly minPeakElevationDeg: number;
   private readonly minDurationSeconds: number;
   private readonly maxPropagationDaysFromEpoch: number;
+  private readonly lookbackMs: number;
+  private readonly elementsCacheTtlMs: number;
 
   public constructor(options: IssPassEventSourceOptions = {}) {
     const defaultFetch = (globalThis as unknown as { fetch?: FetchLike }).fetch;
@@ -228,29 +274,52 @@ export class IssPassEventSource implements AstronomyEventSource {
     this.minPeakElevationDeg = options.minPeakElevationDeg ?? 20;
     this.minDurationSeconds = options.minDurationSeconds ?? 60;
     this.maxPropagationDaysFromEpoch = options.maxPropagationDaysFromEpoch ?? 7;
+    this.lookbackMs = (options.lookbackMinutes ?? 5) * MINUTE_MS;
+    this.elementsCacheTtlMs = options.elementsCacheTtlMs ?? 15 * MINUTE_MS;
   }
 
   private async loadIssElements(): Promise<LoadedIssElements> {
-    const response = await this.fetchImpl(this.ommUrl, {
+    const nowMs = Date.now();
+    pruneExpiredEntries(issElementsCache, nowMs);
+    const cacheKey = this.ommUrl;
+    const cached = issElementsCache.get(cacheKey);
+
+    if (cached) {
+      return cached.value;
+    }
+
+    const request = this.fetchImpl(this.ommUrl, {
       headers: {
         accept: "application/json"
       }
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(
+            `CelesTrak ISS OMM request failed with ${response.status} ${response.statusText}: ${body}`
+          );
+        }
+
+        const record = normalizeCelesTrakOmmPayload(await response.json());
+
+        return {
+          satrec: json2satrec(record),
+          objectName: record.OBJECT_NAME ?? "ISS",
+          epoch: parseEpoch(record.EPOCH)
+        };
+      })
+      .catch((error) => {
+        issElementsCache.delete(cacheKey);
+        throw error;
+      });
+
+    issElementsCache.set(cacheKey, {
+      expiresAt: nowMs + this.elementsCacheTtlMs,
+      value: request
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `CelesTrak ISS OMM request failed with ${response.status} ${response.statusText}: ${body}`
-      );
-    }
-
-    const record = normalizeCelesTrakOmmPayload(await response.json());
-
-    return {
-      satrec: json2satrec(record),
-      objectName: record.OBJECT_NAME ?? "ISS",
-      epoch: parseEpoch(record.EPOCH)
-    };
+    return request;
   }
 
   public async generateEvents(
@@ -258,14 +327,21 @@ export class IssPassEventSource implements AstronomyEventSource {
     timeRange: TimeRange
   ): Promise<AstronomyEventCandidate[]> {
     const elements = await this.loadIssElements();
+    const liveAnchor = observer.liveAnchorTime ?? observer.snapshotTime ?? timeRange.start;
     const propagationStart = new Date(
       elements.epoch.getTime() - this.maxPropagationDaysFromEpoch * DAY_MS
     );
     const propagationEnd = new Date(
       elements.epoch.getTime() + this.maxPropagationDaysFromEpoch * DAY_MS
     );
-    const startMs = Math.max(timeRange.start.getTime(), propagationStart.getTime());
-    const endMs = Math.min(timeRange.end.getTime(), propagationEnd.getTime());
+    const startMs = Math.max(
+      floorDateToInterval(liveAnchor, this.sampleMs).getTime() - this.lookbackMs,
+      propagationStart.getTime()
+    );
+    const endMs = Math.min(
+      ceilDateToInterval(timeRange.end, this.sampleMs).getTime(),
+      propagationEnd.getTime()
+    );
     const passes: ActivePass[] = [];
     let activePass: ActivePass | undefined;
 
@@ -297,15 +373,18 @@ export class IssPassEventSource implements AstronomyEventSource {
       passes.push(activePass);
     }
 
-    return passes.flatMap((pass) => {
-      const event = passToEvent(
-        pass,
-        elements.objectName,
-        this.minPeakElevationDeg,
-        this.minDurationSeconds
-      );
+    return passes
+      .flatMap((pass) => {
+        const event = passToEvent(
+          pass,
+          elements.objectName,
+          this.minPeakElevationDeg,
+          this.minDurationSeconds
+        );
 
-      return event ? [event] : [];
-    });
+        return event ? [event] : [];
+      })
+      .filter((event) => event.endTime.getTime() >= liveAnchor.getTime())
+      .sort((left, right) => left.peakTime.getTime() - right.peakTime.getTime());
   }
 }

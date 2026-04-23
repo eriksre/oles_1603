@@ -19,16 +19,18 @@ interface CliOptions {
   visibilityWindowHours: number;
 }
 
+const DEFAULT_QUERY_DAYS = 7;
+
 const usage = `Print raw locally-derived astronomy events.
 
 Usage:
-  npm run events:local -- --date 2025-03-01 --days 31 --lat -33.8688 --lon 151.2093 --place "Sydney"
-  npm run events:local -- --date 2025-03-01 --end 2025-03-31 --lat -33.8688 --lon 151.2093 --json
+  npm run events:local -- --lat -33.8688 --lon 151.2093 --place "Sydney"
+  npm run events:local -- --lat -33.8688 --lon 151.2093 --end 2026-04-30 --json
 
 Options:
-  --date YYYY-MM-DD|ISO      Start date/time. Date-only values start at 00:00 UTC.
+  --date YYYY-MM-DD|ISO      Optional start date/time. Defaults to now.
   --end YYYY-MM-DD|ISO       End date/time. Date-only values end at 23:59:59.999 UTC.
-  --days N                   Number of days from --date when --end is omitted. Default: 14.
+  --days N                   Number of days from --date or now when --end is omitted. Default: 7.
   --lat N                    Observer latitude.
   --lon N                    Observer longitude.
   --elevation N              Observer elevation in meters.
@@ -98,7 +100,7 @@ function parseEventTypes(value: string | undefined): EventType[] | undefined {
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
-    days: 14,
+    days: DEFAULT_QUERY_DAYS,
     json: false,
     nativeOnly: false,
     includeBelowHorizon: false,
@@ -167,10 +169,6 @@ function parseArgs(argv: string[]): CliOptions {
     }
   }
 
-  if (!options.date) {
-    throw new Error("Missing --date.");
-  }
-
   if (options.latitude === undefined || options.longitude === undefined) {
     throw new Error("Missing --lat and/or --lon.");
   }
@@ -219,7 +217,7 @@ function eventLines(event: AstronomyEventCandidate, index: number): string[] {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const start = parseDate(options.date, "--date");
+  const start = options.date ? parseDate(options.date, "--date") : new Date();
   const end = options.end
     ? parseDate(options.end, "--end", true)
     : new Date(start.getTime() + options.days * 24 * 60 * 60 * 1000 - 1);

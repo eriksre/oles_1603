@@ -1,348 +1,376 @@
 import type { AstronomyEventCandidate } from "../domain/events.js";
 import type { ObserverContext, TimeRange } from "../domain/observer.js";
 import type { AstronomyEventSource } from "./contracts.js";
-import { azimuthToDirectionLabel, normalizeDegrees } from "../utils/direction.js";
+import {
+  BomSpaceWeatherClient,
+  type BomAuroraAlert,
+  type BomAuroraNoticeBundle,
+  type BomAuroraOutlook,
+  type BomAuroraWatch
+} from "../providers/space-weather/bom.js";
 import { getLocalSkyContext } from "../utils/observer-sky.js";
 
-export interface FetchLikeResponse {
-  ok: boolean;
-  status: number;
-  statusText: string;
-  json(): Promise<unknown>;
-  text(): Promise<string>;
+type AuroraLatBand = "high" | "mid" | "low" | "equatorial";
+type AuroraNotice = BomAuroraAlert | BomAuroraWatch | BomAuroraOutlook;
+
+interface SkyContext {
+  sunAltitudeDeg: number;
+  moonAltitudeDeg: number;
+  moonIllumination: number;
 }
 
-export type FetchLike = (
-  input: string,
-  init?: {
-    headers?: Record<string, string>;
-    signal?: unknown;
-  }
-) => Promise<FetchLikeResponse>;
-
-export interface OvationAuroraPoint {
-  longitude: number;
-  latitude: number;
-  aurora: number;
+interface NoticeWindow {
+  start: Date;
+  end: Date;
 }
 
-export interface NormalizedOvationAuroraForecast {
-  observationTime: Date;
-  forecastTime: Date;
-  points: OvationAuroraPoint[];
+interface BestViewingWindow {
+  time: Date;
+  sky: SkyContext;
+}
+
+interface BomSpaceWeatherNoticeClient {
+  getAuroraNotices(): Promise<BomAuroraNoticeBundle>;
 }
 
 export interface AuroraEventSourceOptions {
-  fetchImpl?: FetchLike;
-  forecastUrl?: string;
-  localAuroraThreshold?: number;
-  nearbyAuroraThreshold?: number;
-  nearbyRadiusKm?: number;
-  auroraHeightKm?: number;
+  client?: BomSpaceWeatherNoticeClient;
+  skyContextResolver?: (time: Date, observer: ObserverContext) => SkyContext;
+  minDarkSkySunAltitudeDeg?: number;
+  now?: Date | (() => Date);
 }
 
-interface OvationAuroraPayload {
-  "Observation Time"?: unknown;
-  "Forecast Time"?: unknown;
-  coordinates?: unknown;
-}
+const HOUR_MS = 60 * 60 * 1000;
+const AURORA_AZIMUTH_DEG = 180;
+const AURORA_SPAN_START_DEG = 135;
+const AURORA_SPAN_END_DEG = 225;
 
-interface ScoredAuroraPoint extends OvationAuroraPoint {
-  distanceKm: number;
-  bearingDeg: number;
-  apparentAltitudeDeg: number;
-}
+const isAuroraLatBand = (value: string | undefined): value is AuroraLatBand =>
+  value === "high" || value === "mid" || value === "low" || value === "equatorial";
 
-const DEFAULT_FORECAST_URL =
-  "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
-const EARTH_RADIUS_KM = 6371;
-const MINUTE_MS = 60 * 1000;
+const resolveAuroraLatBand = (notice: AuroraNotice): AuroraLatBand | undefined =>
+  isAuroraLatBand(notice.latBand) ? notice.latBand : undefined;
 
-function toDate(value: unknown, fieldName: string): Date {
-  if (typeof value !== "string") {
-    throw new Error(`NOAA OVATION payload is missing ${fieldName}.`);
+const inRange = (time: Date, range: TimeRange): boolean =>
+  time.getTime() >= range.start.getTime() && time.getTime() <= range.end.getTime();
+
+const clampWindowToRange = (
+  window: NoticeWindow,
+  range: TimeRange
+): NoticeWindow | undefined => {
+  const start = new Date(Math.max(window.start.getTime(), range.start.getTime()));
+  const end = new Date(Math.min(window.end.getTime(), range.end.getTime()));
+
+  return start.getTime() <= end.getTime() ? { start, end } : undefined;
+};
+
+const endOfUtcDay = (utcDate: string): Date =>
+  new Date(`${utcDate}T23:59:59.999Z`);
+
+const startOfUtcDay = (utcDate: string): Date =>
+  new Date(`${utcDate}T00:00:00.000Z`);
+
+const isLikelyAustralianObserver = (observer: ObserverContext): boolean =>
+  observer.latitude <= -9 && observer.latitude >= -55 && observer.longitude >= 95 && observer.longitude <= 180;
+
+const isSouthwestWesternAustralia = (observer: ObserverContext): boolean =>
+  observer.latitude <= -33 && observer.longitude >= 112 && observer.longitude <= 121;
+
+const isObserverWithinKIndexVisibility = (
+  observer: ObserverContext,
+  kAus: number
+): boolean => {
+  if (!isLikelyAustralianObserver(observer)) {
+    return false;
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`NOAA OVATION ${fieldName} is not a valid timestamp.`);
+  if (kAus >= 9) {
+    return observer.latitude <= -10;
   }
 
-  return date;
-}
-
-function toFiniteNumber(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-export function normalizeOvationAuroraForecast(
-  payload: OvationAuroraPayload
-): NormalizedOvationAuroraForecast {
-  if (!Array.isArray(payload.coordinates)) {
-    throw new Error("NOAA OVATION payload is missing coordinates.");
+  if (kAus >= 8) {
+    return observer.latitude <= -28;
   }
 
-  const points = payload.coordinates.flatMap((row): OvationAuroraPoint[] => {
-    if (!Array.isArray(row) || row.length < 3) {
-      return [];
-    }
+  if (kAus >= 7) {
+    return observer.latitude <= -35.5;
+  }
 
-    const longitude = toFiniteNumber(row[0]);
-    const latitude = toFiniteNumber(row[1]);
-    const aurora = toFiniteNumber(row[2]);
+  if (kAus >= 6) {
+    return observer.latitude <= -38 || isSouthwestWesternAustralia(observer);
+  }
 
-    if (
-      longitude === undefined ||
-      latitude === undefined ||
-      aurora === undefined ||
-      latitude < -90 ||
-      latitude > 90
-    ) {
-      return [];
-    }
+  if (kAus >= 5) {
+    return observer.latitude <= -38;
+  }
 
-    return [
-      {
-        longitude: normalizeLongitude(longitude),
-        latitude,
-        aurora
+  if (kAus >= 4) {
+    return observer.latitude <= -40;
+  }
+
+  if (kAus >= 3) {
+    return observer.latitude <= -42;
+  }
+
+  return false;
+};
+
+const isObserverWithinLatBand = (
+  observer: ObserverContext,
+  latBand: AuroraLatBand
+): boolean => {
+  if (!isLikelyAustralianObserver(observer)) {
+    return false;
+  }
+
+  switch (latBand) {
+    case "equatorial":
+      return observer.latitude <= -10;
+    case "low":
+      return observer.latitude <= -28;
+    case "mid":
+      return observer.latitude <= -35.5;
+    case "high":
+      return observer.latitude <= -38 || isSouthwestWesternAustralia(observer);
+  }
+};
+
+const isObserverWithinVisibilityRegion = (
+  observer: ObserverContext,
+  notice: AuroraNotice
+): boolean => {
+  const latBand = resolveAuroraLatBand(notice);
+
+  return latBand !== undefined &&
+    isObserverWithinKIndexVisibility(observer, notice.kAus ?? 0) &&
+    isObserverWithinLatBand(observer, latBand);
+};
+
+const estimateAuroraAltitudeDeg = (
+  observer: ObserverContext,
+  latBand: AuroraLatBand
+): number => {
+  let altitude =
+    observer.latitude <= -42
+      ? 20
+      : observer.latitude <= -39
+        ? 15
+        : observer.latitude <= -36
+          ? 11
+          : observer.latitude <= -32
+            ? 7
+            : 4;
+
+  if (latBand === "mid") {
+    altitude += 2;
+  } else if (latBand === "low") {
+    altitude += 4;
+  } else if (latBand === "equatorial") {
+    altitude += 6;
+  }
+
+  return Math.min(30, altitude);
+};
+
+const getNoticeWindow = (notice: AuroraNotice): NoticeWindow =>
+  notice.kind === "alert"
+    ? {
+        start: notice.startTime,
+        end: notice.validUntil
       }
-    ];
-  });
+    : {
+        start: startOfUtcDay(notice.startDate),
+        end: endOfUtcDay(notice.endDate)
+      };
 
-  return {
-    observationTime: toDate(payload["Observation Time"], "Observation Time"),
-    forecastTime: toDate(payload["Forecast Time"], "Forecast Time"),
-    points
-  };
-}
+const getNoticeNarrative = (notice: AuroraNotice): string =>
+  notice.kind === "alert" ? notice.description : notice.comments;
 
-function normalizeLongitude(longitude: number): number {
-  const normalized = normalizeDegrees(longitude);
-  return normalized > 180 ? normalized - 360 : normalized;
-}
+const getNoticeIssuedAt = (notice: AuroraNotice): Date =>
+  notice.kind === "alert" ? notice.startTime : notice.issueTime;
 
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
-}
+const getNoticeConfidence = (notice: AuroraNotice): number => {
+  const kAus = notice.kAus ?? 6;
 
-function toDegrees(radians: number): number {
-  return (radians * 180) / Math.PI;
-}
-
-function distanceKm(
-  left: Pick<OvationAuroraPoint, "latitude" | "longitude">,
-  right: Pick<OvationAuroraPoint, "latitude" | "longitude">
-): number {
-  const leftLat = toRadians(left.latitude);
-  const rightLat = toRadians(right.latitude);
-  const deltaLat = toRadians(right.latitude - left.latitude);
-  const deltaLon = toRadians(right.longitude - left.longitude);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(leftLat) *
-      Math.cos(rightLat) *
-      Math.sin(deltaLon / 2) ** 2;
-
-  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function bearingDeg(
-  from: Pick<OvationAuroraPoint, "latitude" | "longitude">,
-  to: Pick<OvationAuroraPoint, "latitude" | "longitude">
-): number {
-  const fromLat = toRadians(from.latitude);
-  const toLat = toRadians(to.latitude);
-  const deltaLon = toRadians(to.longitude - from.longitude);
-  const y = Math.sin(deltaLon) * Math.cos(toLat);
-  const x =
-    Math.cos(fromLat) * Math.sin(toLat) -
-    Math.sin(fromLat) * Math.cos(toLat) * Math.cos(deltaLon);
-
-  return normalizeDegrees(toDegrees(Math.atan2(y, x)));
-}
-
-function apparentAuroraAltitudeDeg(distanceKmValue: number, auroraHeightKm: number): number {
-  if (distanceKmValue <= 1) {
-    return 90;
+  if (notice.kind === "alert") {
+    return Math.max(0.75, Math.min(0.95, 0.72 + kAus * 0.03));
   }
 
-  const centralAngle = distanceKmValue / EARTH_RADIUS_KM;
-  const numerator =
-    (EARTH_RADIUS_KM + auroraHeightKm) * Math.cos(centralAngle) -
-    EARTH_RADIUS_KM;
-  const denominator =
-    (EARTH_RADIUS_KM + auroraHeightKm) * Math.sin(centralAngle);
+  if (notice.kind === "watch") {
+    return Math.max(0.62, Math.min(0.88, 0.56 + kAus * 0.03));
+  }
 
-  return toDegrees(Math.atan2(numerator, denominator));
-}
+  return Math.max(0.5, Math.min(0.8, 0.4 + kAus * 0.04));
+};
 
-function inRange(time: Date, range: TimeRange): boolean {
-  return time.getTime() >= range.start.getTime() && time.getTime() <= range.end.getTime();
-}
+const getNoticeTitle = (notice: AuroraNotice): string => {
+  if (notice.kind === "alert") {
+    return "Aurora alert";
+  }
 
-function scorePointForObserver(
-  point: OvationAuroraPoint,
+  if (notice.kind === "watch") {
+    return "Aurora watch";
+  }
+
+  return "Aurora outlook";
+};
+
+const sampleTimes = (window: NoticeWindow): Date[] => {
+  const times: Date[] = [];
+
+  for (let timeMs = window.start.getTime(); timeMs <= window.end.getTime(); timeMs += HOUR_MS) {
+    times.push(new Date(timeMs));
+  }
+
+  if (times.length === 0 || times[times.length - 1]!.getTime() !== window.end.getTime()) {
+    times.push(window.end);
+  }
+
+  return times;
+};
+
+const findBestViewingWindow = (
+  window: NoticeWindow,
   observer: ObserverContext,
-  auroraHeightKm: number
-): ScoredAuroraPoint {
-  const observerPoint = {
-    latitude: observer.latitude,
-    longitude: observer.longitude
-  };
-  const pointDistanceKm = distanceKm(observerPoint, point);
+  minDarkSkySunAltitudeDeg: number,
+  skyContextResolver: (time: Date, observer: ObserverContext) => SkyContext
+): BestViewingWindow | undefined => {
+  let best: BestViewingWindow | undefined;
 
-  return {
-    ...point,
-    distanceKm: pointDistanceKm,
-    bearingDeg: bearingDeg(observerPoint, point),
-    apparentAltitudeDeg: apparentAuroraAltitudeDeg(pointDistanceKm, auroraHeightKm)
-  };
-}
+  for (const time of sampleTimes(window)) {
+    const sky = skyContextResolver(time, observer);
 
-function selectAuroraPoint(
-  forecast: NormalizedOvationAuroraForecast,
-  observer: ObserverContext,
-  options: Required<Pick<
-    AuroraEventSourceOptions,
-    "localAuroraThreshold" | "nearbyAuroraThreshold" | "nearbyRadiusKm" | "auroraHeightKm"
-  >>
-): ScoredAuroraPoint | undefined {
-  const scored = forecast.points.map((point) =>
-    scorePointForObserver(point, observer, options.auroraHeightKm)
-  );
-  const local = [...scored].sort(
-    (left, right) => left.distanceKm - right.distanceKm
-  )[0];
-  const nearby = scored
-    .filter((point) => point.distanceKm <= options.nearbyRadiusKm)
-    .sort(
-      (left, right) =>
-        right.aurora - left.aurora ||
-        left.distanceKm - right.distanceKm
-    )[0];
+    if (sky.sunAltitudeDeg > minDarkSkySunAltitudeDeg) {
+      continue;
+    }
 
-  if (local && local.distanceKm <= 160 && local.aurora >= options.localAuroraThreshold) {
-    return local;
+    if (!best || sky.sunAltitudeDeg < best.sky.sunAltitudeDeg) {
+      best = { time, sky };
+    }
   }
 
-  if (
-    nearby &&
-    nearby.aurora >= options.nearbyAuroraThreshold &&
-    nearby.apparentAltitudeDeg > 0
-  ) {
-    return nearby;
-  }
+  return best;
+};
 
-  return undefined;
-}
+const buildDescription = (
+  notice: AuroraNotice,
+  observer: ObserverContext
+): string => {
+  const place = observer.locationLabel?.trim();
+  const locationPrefix = place ? `${place} is within` : "Your location is within";
+
+  return `${getNoticeNarrative(notice)} ${locationPrefix} BOM's ${notice.latBand}-latitude aurora visibility region.`;
+};
+
+const buildInstructionText = (
+  notice: AuroraNotice,
+  bestViewingWindow: BestViewingWindow
+): string => {
+  const issuedAt = getNoticeIssuedAt(notice).toISOString();
+
+  return `BOM ${notice.kind} issued at ${issuedAt}. Around ${bestViewingWindow.time.toISOString()}, scan the southern horizon from SE through SW under dark skies.`;
+};
 
 export class AuroraEventSource implements AstronomyEventSource {
-  private readonly fetchImpl: FetchLike;
-  private readonly forecastUrl: string;
-  private readonly localAuroraThreshold: number;
-  private readonly nearbyAuroraThreshold: number;
-  private readonly nearbyRadiusKm: number;
-  private readonly auroraHeightKm: number;
+  private readonly client: BomSpaceWeatherNoticeClient;
+  private readonly skyContextResolver: (time: Date, observer: ObserverContext) => SkyContext;
+  private readonly minDarkSkySunAltitudeDeg: number;
+  private readonly now: () => Date;
 
   public constructor(options: AuroraEventSourceOptions = {}) {
-    const defaultFetch = (globalThis as unknown as { fetch?: FetchLike }).fetch;
-    this.fetchImpl =
-      options.fetchImpl ??
-      ((input, init) => {
-        if (!defaultFetch) {
-          throw new Error("Global fetch is unavailable; provide fetchImpl explicitly.");
-        }
-
-        return defaultFetch(input, init);
-      });
-    this.forecastUrl = options.forecastUrl ?? DEFAULT_FORECAST_URL;
-    this.localAuroraThreshold = options.localAuroraThreshold ?? 10;
-    this.nearbyAuroraThreshold = options.nearbyAuroraThreshold ?? 20;
-    this.nearbyRadiusKm = options.nearbyRadiusKm ?? 1000;
-    this.auroraHeightKm = options.auroraHeightKm ?? 110;
+    this.client = options.client ?? new BomSpaceWeatherClient();
+    this.skyContextResolver = options.skyContextResolver ?? getLocalSkyContext;
+    this.minDarkSkySunAltitudeDeg = options.minDarkSkySunAltitudeDeg ?? -6;
+    if (typeof options.now === "function") {
+      this.now = options.now;
+    } else if (options.now) {
+      this.now = () => options.now as Date;
+    } else {
+      this.now = () => new Date();
+    }
   }
 
   public async generateEvents(
     observer: ObserverContext,
     timeRange: TimeRange
   ): Promise<AstronomyEventCandidate[]> {
-    const response = await this.fetchImpl(this.forecastUrl, {
-      headers: {
-        accept: "application/json"
-      }
-    });
+    const notices = await this.client.getAuroraNotices();
+    const currentTime = this.now();
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `NOAA OVATION request failed with ${response.status} ${response.statusText}: ${body}`
-      );
+    return [...notices.alert, ...notices.watch, ...notices.outlook]
+      .flatMap((notice) => this.noticeToEvent(notice, observer, timeRange, currentTime))
+      .sort((left, right) => left.peakTime.getTime() - right.peakTime.getTime());
+  }
+
+  private noticeToEvent(
+    notice: AuroraNotice,
+    observer: ObserverContext,
+    timeRange: TimeRange,
+    currentTime: Date
+  ): AstronomyEventCandidate[] {
+    if (!isObserverWithinVisibilityRegion(observer, notice)) {
+      return [];
     }
 
-    const forecast = normalizeOvationAuroraForecast(
-      (await response.json()) as OvationAuroraPayload
+    const latBand = resolveAuroraLatBand(notice);
+
+    if (!latBand) {
+      return [];
+    }
+
+    const clampedWindow = clampWindowToRange(getNoticeWindow(notice), timeRange);
+
+    if (!clampedWindow) {
+      return [];
+    }
+
+    const bestViewingWindow = findBestViewingWindow(
+      clampedWindow,
+      observer,
+      this.minDarkSkySunAltitudeDeg,
+      this.skyContextResolver
     );
 
-    if (!inRange(forecast.forecastTime, timeRange)) {
+    if (!bestViewingWindow) {
       return [];
     }
 
-    const sky = getLocalSkyContext(forecast.forecastTime, observer);
-
-    if (sky.sunAltitudeDeg > -6) {
-      return [];
-    }
-
-    const selectedPoint = selectAuroraPoint(forecast, observer, {
-      localAuroraThreshold: this.localAuroraThreshold,
-      nearbyAuroraThreshold: this.nearbyAuroraThreshold,
-      nearbyRadiusKm: this.nearbyRadiusKm,
-      auroraHeightKm: this.auroraHeightKm
-    });
-
-    if (!selectedPoint) {
-      return [];
-    }
-
-    const directionLabel = azimuthToDirectionLabel(selectedPoint.bearingDeg);
-    const forecastIso = forecast.forecastTime.toISOString();
+    const issuedAt = getNoticeIssuedAt(notice);
+    const peakTime = inRange(currentTime, clampedWindow)
+      ? bestViewingWindow.time
+      : bestViewingWindow.time;
+    const altitudeDeg = estimateAuroraAltitudeDeg(observer, latBand);
 
     return [
       {
-        id: `aurora-${forecastIso.replace(/[-:.]/g, "")}-${Math.round(
+        id: `aurora-${notice.kind}-${issuedAt.toISOString().replace(/[-:.]/g, "")}-${Math.round(
           observer.latitude * 100
         )}-${Math.round(observer.longitude * 100)}`,
         eventType: "aurora",
-        title: "Aurora opportunity",
-        description: `NOAA SWPC OVATION forecasts aurora value ${Math.round(
-          selectedPoint.aurora
-        )} ${Math.round(selectedPoint.distanceKm)} km away toward ${directionLabel}.`,
-        startTime: new Date(forecast.forecastTime.getTime() - 30 * MINUTE_MS),
-        peakTime: forecast.forecastTime,
-        endTime: new Date(forecast.forecastTime.getTime() + 90 * MINUTE_MS),
+        title: getNoticeTitle(notice),
+        description: buildDescription(notice, observer),
+        startTime: clampedWindow.start,
+        peakTime,
+        endTime: clampedWindow.end,
         sourceType: "live",
-        sourceName: "noaa-swpc-ovation",
-        confidence: Math.max(0.55, Math.min(0.95, selectedPoint.aurora / 100 + 0.45)),
-        targetAzimuthDeg: selectedPoint.bearingDeg,
-        targetAltitudeDeg: selectedPoint.apparentAltitudeDeg,
-        targetDirectionLabel: directionLabel,
-        localBestViewingTime: forecast.forecastTime,
-        localBestViewingAzimuthDeg: selectedPoint.bearingDeg,
-        localBestViewingAltitudeDeg: selectedPoint.apparentAltitudeDeg,
-        localBestViewingDirectionLabel: directionLabel,
-        sunAltitudeDeg: sky.sunAltitudeDeg,
-        moonAltitudeDeg: sky.moonAltitudeDeg,
-        moonIllumination: sky.moonIllumination,
-        localBestViewingSunAltitudeDeg: sky.sunAltitudeDeg,
-        localBestViewingMoonAltitudeDeg: sky.moonAltitudeDeg,
-        localBestViewingMoonIllumination: sky.moonIllumination,
-        instructionText: `At ${forecastIso}, look ${directionLabel}; the aurora may sit about ${Math.max(
-          1,
-          Math.round(selectedPoint.apparentAltitudeDeg)
-        )} degrees above the horizon.`
+        sourceName: "bom-space-weather",
+        confidence: getNoticeConfidence(notice),
+        targetAzimuthDeg: AURORA_AZIMUTH_DEG,
+        targetAltitudeDeg: altitudeDeg,
+        targetDirectionLabel: "S",
+        azimuthSpanStartDeg: AURORA_SPAN_START_DEG,
+        azimuthSpanEndDeg: AURORA_SPAN_END_DEG,
+        localBestViewingTime: bestViewingWindow.time,
+        localBestViewingAzimuthDeg: AURORA_AZIMUTH_DEG,
+        localBestViewingAltitudeDeg: altitudeDeg,
+        localBestViewingDirectionLabel: "S",
+        sunAltitudeDeg: bestViewingWindow.sky.sunAltitudeDeg,
+        moonAltitudeDeg: bestViewingWindow.sky.moonAltitudeDeg,
+        moonIllumination: bestViewingWindow.sky.moonIllumination,
+        localBestViewingSunAltitudeDeg: bestViewingWindow.sky.sunAltitudeDeg,
+        localBestViewingMoonAltitudeDeg: bestViewingWindow.sky.moonAltitudeDeg,
+        localBestViewingMoonIllumination: bestViewingWindow.sky.moonIllumination,
+        instructionText: buildInstructionText(notice, bestViewingWindow)
       }
     ];
   }

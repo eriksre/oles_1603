@@ -41,19 +41,6 @@ export type WeatherContext = {
   windSpeedKph: number;
 };
 
-export type PlaceCandidate = {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  elevationM: number;
-  distanceM: number;
-  travelTimeMinutes: number;
-  placeType: "viewpoint" | "peak" | "observation_tower" | "park" | "camp_site" | "beach";
-  openHorizonScore: number;
-  darkSkyScore: number;
-};
-
 export function baseObserver(): ObserverContext {
   return {
     lat: -33.8688,
@@ -69,22 +56,6 @@ export function baseWeather(overrides: Partial<WeatherContext> = {}): WeatherCon
     lowCloudCoverPct: 8,
     visibilityKm: 20,
     windSpeedKph: 9,
-    ...overrides,
-  };
-}
-
-export function basePlace(overrides: Partial<PlaceCandidate> = {}): PlaceCandidate {
-  return {
-    id: "place-observatory-hill",
-    name: "Observatory Hill",
-    lat: -33.8599,
-    lon: 151.206,
-    elevationM: 60,
-    distanceM: 1400,
-    travelTimeMinutes: 6,
-    placeType: "viewpoint",
-    openHorizonScore: 92,
-    darkSkyScore: 34,
     ...overrides,
   };
 }

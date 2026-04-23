@@ -75,32 +75,6 @@ export interface OpenRouterResolvedConfig {
   baseUrl: string;
 }
 
-export interface LocationCandidate {
-  id: string;
-  name: string;
-  travelTimeMinutes?: number;
-  distanceMeters?: number;
-  latitude?: number;
-  longitude?: number;
-  directionLabel?: string;
-  opennessScore?: number;
-  notes?: string;
-}
-
-export interface ChooseBestLocationInput {
-  eventTitle: string;
-  eventDescription: string;
-  maxDriveMinutes: number;
-  candidates: LocationCandidate[];
-}
-
-export interface ChooseBestLocationResult {
-  chosenLocationId: string;
-  chosenLocationName: string;
-  reason: string;
-  confidence: number;
-}
-
 export interface GenerateEventDescriptionInput {
   eventTitle: string;
   eventSummary: string;
@@ -123,7 +97,18 @@ const envFromGlobal = (): OpenRouterClientEnv => {
 const stripCodeFences = (value: string): string =>
   value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
-const parseJsonPayload = <T>(content: string): T => JSON.parse(stripCodeFences(content)) as T;
+const collapseWhitespace = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const ensureTrailingPeriod = (value: string): string =>
+  /[.!?]$/.test(value) ? value : `${value}.`;
+
+const splitSentences = (value: string): string[] =>
+  collapseWhitespace(value)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
 
 const requireString = (value: string | undefined, label: string): string => {
   if (!value) {
@@ -133,12 +118,58 @@ const requireString = (value: string | undefined, label: string): string => {
   return value;
 };
 
-const sortCandidates = (candidates: LocationCandidate[]): LocationCandidate[] =>
-  [...candidates].sort(
-    (left, right) =>
-      (left.travelTimeMinutes ?? Number.POSITIVE_INFINITY) -
-      (right.travelTimeMinutes ?? Number.POSITIVE_INFINITY)
+const buildDescriptionFallbackSentence = (
+  input: GenerateEventDescriptionInput
+): string => {
+  if (input.directionHint) {
+    return `Look toward ${input.directionHint} for the best view.`;
+  }
+
+  return "Look for a clear, dark patch of sky for the best view.";
+};
+
+const stripLocationReferences = (value: string, locationName: string): string => {
+  const trimmedLocationName = locationName.trim();
+
+  if (!trimmedLocationName) {
+    return collapseWhitespace(value);
+  }
+
+  const escapedLocationName = escapeRegExp(trimmedLocationName);
+
+  return collapseWhitespace(
+    value
+      .replace(
+        new RegExp(
+          `\\b(?:over|above|from|at|near|around|by|in|across|off|outside)\\s+${escapedLocationName}\\b`,
+          "gi"
+        ),
+        ""
+      )
+      .replace(new RegExp(`\\b${escapedLocationName}\\b`, "gi"), "")
+      .replace(/\s+([,.;!?])/g, "$1")
+      .replace(/\(\s*\)/g, "")
   );
+};
+
+const normalizeEventDescription = (
+  content: string,
+  input: GenerateEventDescriptionInput
+): string => {
+  const sentences = splitSentences(
+    stripLocationReferences(stripCodeFences(content), input.locationName)
+  );
+
+  if (sentences.length >= 2) {
+    return sentences.slice(0, 2).map(ensureTrailingPeriod).join(" ");
+  }
+
+  if (sentences.length === 1) {
+    return `${ensureTrailingPeriod(sentences[0])} ${buildDescriptionFallbackSentence(input)}`;
+  }
+
+  return `${ensureTrailingPeriod(input.eventSummary)} ${buildDescriptionFallbackSentence(input)}`;
+};
 
 export const resolveOpenRouterConfig = (
   options: OpenRouterClientOptions = {}
@@ -217,17 +248,16 @@ export class OpenRouterClient {
         {
           role: "system",
           content:
-            "You write short, concrete astronomy event descriptions for a consumer app. Keep it factual, vivid, and brief."
+            "You write short, concrete astronomy event descriptions for a consumer app. Assume the reader may not know the event name, and explain what the event is in plain language before giving viewing details. Return exactly two sentences, keep it factual and vivid, do not use lists or markdown, and do not mention specific place names, venues, parks, neighborhoods, or addresses."
         },
         {
           role: "user",
           content: [
             `Event: ${input.eventTitle}`,
             `Summary: ${input.eventSummary}`,
-            `Location: ${input.locationName}`,
             input.directionHint ? `Direction: ${input.directionHint}` : undefined,
             input.viewingNotes ? `Notes: ${input.viewingNotes}` : undefined,
-            "Write one concise description the user can read quickly."
+            "Write exactly two sentences the user can read quickly. Start by naming what kind of event this is in plain language if the title is obscure, then describe where to look in the sky with generic directions."
           ]
             .filter((line): line is string => Boolean(line))
             .join("\n")
@@ -235,52 +265,9 @@ export class OpenRouterClient {
       ]
     });
 
-    return requireString(completion.choices[0]?.message?.content ?? undefined, "OpenRouter description");
-  }
-
-  public async chooseBestLocation(
-    input: ChooseBestLocationInput
-  ): Promise<ChooseBestLocationResult> {
-    if (input.candidates.length === 0) {
-      throw new Error("At least one candidate location is required.");
-    }
-
-    const rankedCandidates = sortCandidates(input.candidates);
-
-    const completion = await this.createChatCompletion({
-      temperature: 0.2,
-      maxTokens: 220,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You choose the best viewing location for an astronomy event. Return JSON only with chosenLocationId, chosenLocationName, reason, and confidence."
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            eventTitle: input.eventTitle,
-            eventDescription: input.eventDescription,
-            maxDriveMinutes: input.maxDriveMinutes,
-            candidates: rankedCandidates.map((candidate) => ({
-              id: candidate.id,
-              name: candidate.name,
-              travelTimeMinutes: candidate.travelTimeMinutes,
-              distanceMeters: candidate.distanceMeters,
-              directionLabel: candidate.directionLabel,
-              opennessScore: candidate.opennessScore,
-              notes: candidate.notes
-            }))
-          })
-        }
-      ]
-    });
-
-    const content = requireString(
-      completion.choices[0]?.message?.content ?? undefined,
-      "OpenRouter location decision"
+    return normalizeEventDescription(
+      requireString(completion.choices[0]?.message?.content ?? undefined, "OpenRouter description"),
+      input
     );
-    return parseJsonPayload<ChooseBestLocationResult>(content);
   }
 }

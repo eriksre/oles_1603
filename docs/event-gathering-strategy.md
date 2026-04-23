@@ -111,11 +111,13 @@ Each implemented source should have a direct query command, and the aggregate sh
 
 Current commands:
 
-- `npm run events:all -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093`
-- `npm run events:local -- --date 2024-12-01 --days 15 --lat -33.8688 --lon 151.2093 --types planet_opposition`
-- `npm run events:meteor -- --date 2026-08-01 --days 45 --lat -33.8688 --lon 151.2093`
-- `npm run events:aurora -- --date 2026-04-17 --days 1 --lat 64.1466 --lon -21.9426`
-- `npm run events:iss -- --date 2026-04-17 --days 3 --lat -33.8688 --lon 151.2093`
+- `npm run events:all -- --lat -33.8688 --lon 151.2093`
+- `npm run events:local -- --lat -33.8688 --lon 151.2093 --types planet_opposition`
+- `npm run events:meteor -- --lat -33.8688 --lon 151.2093`
+- `npm run events:aurora -- --lat 64.1466 --lon -21.9426`
+- `npm run events:iss -- --lat -33.8688 --lon 151.2093`
+
+These commands default to querying from now through the next 7 days unless `--date`, `--end`, or `--days` is provided explicitly.
 
 When new sources are implemented, add one source-specific command and include that source in `events:all`.
 

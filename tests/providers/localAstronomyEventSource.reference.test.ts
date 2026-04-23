@@ -274,7 +274,8 @@ describe("LocalAstronomyEventSource reference events", () => {
       }
     );
 
-    expect(event.title).toBe("Planet parade");
+    expect(event.title).toContain("Planet parade:");
+    expect(event.description).toMatch(/Mercury|Venus|Mars|Jupiter|Saturn/);
     expect(event.startTime.getTime()).toBeLessThanOrEqual(utc("2025-02-25T00:00:00Z").getTime());
     expect(event.endTime.getTime()).toBeGreaterThanOrEqual(utc("2025-02-25T01:00:00Z").getTime());
     expect(event.sunAltitudeDeg).toBeLessThanOrEqual(-6);
