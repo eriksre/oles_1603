@@ -1163,8 +1163,8 @@ export default function OrreryPage() {
     }
 
     // ─── Sun ──────────────────────────────────────────────────────────────────
-    const BODY_VISUAL_SCALE = 1.12;
-    const SUN_RADIUS = 40 * BODY_VISUAL_SCALE;
+    const BODY_VISUAL_SCALE = 1.5;
+    const SUN_RADIUS = 35 * BODY_VISUAL_SCALE;
     // User explicitly asked for the 8k sun. Note: Solar System Scope labels
     // their highest-res sun as "8k" but it's actually 4096×2048. It's still
     // 4× the area of the previous 2k map so surface granulation reads
