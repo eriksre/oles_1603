@@ -1,18 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Orbitron, Sora } from "next/font/google";
+import { Space_Grotesk, Space_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
 
-const orbitron = Orbitron({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-orbitron",
+  variable: "--font-space-grotesk",
 });
 
-const sora = Sora({
+const spaceMono = Space_Mono({
   subsets: ["latin"],
+  weight: ["400", "700"],
   display: "swap",
-  variable: "--font-sora",
+  variable: "--font-space-mono",
 });
 
 export const metadata: Metadata = {
@@ -29,8 +30,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${orbitron.variable} ${sora.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable}`} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         {children}
       </body>
     </html>

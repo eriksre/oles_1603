@@ -1,8 +1,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --font-display: var(--font-orbitron), "Helvetica Neue", Arial, sans-serif;
-  --font-copy: var(--font-sora), "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-space-grotesk), "Helvetica Neue", Arial, sans-serif;
+  --font-copy: var(--font-space-grotesk), "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-space-mono), "SFMono-Regular", Consolas, monospace;
 }
 
 html, body {
@@ -53,7 +54,10 @@ html, body {
   position: absolute;
   right: 40px; top: 50%;
   transform: translateY(-50%);
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: center;
   max-width: 220px;
   pointer-events: auto;
 }
@@ -62,16 +66,16 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.5);
   margin-bottom: 14px;
 }
 
 .event-meta {
-  font-family: var(--font-copy);
+  font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.03em;
+  font-weight: 400;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   color: rgba(255, 235, 180, 0.42);
   margin-bottom: 14px;
@@ -82,7 +86,7 @@ html, body {
   font-size: clamp(52px, 6vw, 80px);
   font-weight: 600;
   line-height: 0.96;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
   text-wrap: balance;
   color: rgba(255, 235, 180, 0.92);
   margin-bottom: 24px;
@@ -90,9 +94,9 @@ html, body {
 
 .event-name-accent {
   font-family: var(--font-copy);
-  color: #ff5a24;
+  color: #F7772A;
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .desc {
@@ -155,7 +159,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: rgba(190, 210, 255, 0.48);
 }
 
@@ -164,6 +168,7 @@ html, body {
   position: relative;
   height: 52px;
   overflow: visible;
+  pointer-events: auto;
 }
 
 .sky-cloud-svg {
@@ -179,6 +184,7 @@ html, body {
   position: absolute;
   inset: 0;
   z-index: 1;
+  pointer-events: auto;
 }
 
 .sky-cloud-hit {
@@ -190,12 +196,9 @@ html, body {
   padding: 0;
   background: transparent;
   cursor: crosshair;
+  pointer-events: auto;
   -webkit-appearance: none;
   appearance: none;
-}
-
-.sky-cloud-hit.active {
-  background: linear-gradient(to bottom, rgba(255, 235, 180, 0.07), transparent 72%);
 }
 
 .sky-cloud-hit:focus-visible {
@@ -210,10 +213,37 @@ html, body {
 }
 
 .sky-cloud-hover-guide {
-  stroke: rgba(255, 235, 180, 0.34);
-  stroke-width: 0.8;
-  stroke-dasharray: 2 2;
-  vector-effect: non-scaling-stroke;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 1px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 235, 180, 0.46) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+.sky-cloud-hover-marker {
+  position: absolute;
+  z-index: 2;
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background:
+    radial-gradient(circle,
+      rgba(255, 235, 180, 0.72) 0%,
+      rgba(255, 235, 180, 0.38) 13%,
+      rgba(255, 235, 180, 0.18) 31%,
+      rgba(190, 210, 255, 0.08) 56%,
+      transparent 78%
+    );
+  filter: blur(0.5px);
 }
 
 .sky-cloud-100-label {
@@ -221,10 +251,10 @@ html, body {
   top: -8px;
   right: 0;
   z-index: 2;
-  font-family: var(--font-copy);
+  font-family: var(--font-mono);
   font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 400;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.42);
   pointer-events: none;
 }
@@ -249,19 +279,19 @@ html, body {
 
 .sky-cloud-tooltip-value,
 .sky-cloud-tooltip-time {
-  font-family: var(--font-copy);
+  font-family: var(--font-mono);
 }
 
 .sky-cloud-tooltip-value {
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.78);
 }
 
 .sky-cloud-tooltip-time {
   font-size: 9px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(190, 210, 255, 0.48);
 }
 
@@ -308,7 +338,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.74);
   white-space: nowrap;
   position: relative;
@@ -390,13 +420,14 @@ html, body {
 .sky-phase-name {
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.58);
 }
 
 .sky-phase-time {
+  font-family: var(--font-mono);
   font-size: 9px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(190, 210, 255, 0.42);
 }
 
@@ -415,9 +446,9 @@ html, body {
 .sky-tick {
   position: absolute;
   transform: translateX(-50%);
-  font-family: var(--font-copy);
+  font-family: var(--font-mono);
   font-size: 9px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.34);
   top: 5px;
   white-space: nowrap;
@@ -440,7 +471,7 @@ html, body {
 }
 
 .time-value {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 36px;
   color: rgba(255, 235, 180, 0.9);
   letter-spacing: 0;
@@ -452,7 +483,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.5);
   margin-top: 6px;
 }
@@ -463,14 +494,17 @@ html, body {
   margin: 24px 0;
 }
 
-.direction-data { margin-bottom: 16px; }
+.direction-data {
+  min-width: 80px;
+  margin-bottom: 16px;
+}
 
 .dir-value {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 28px;
-  color: #ff6633;
+  color: #F7772A;
   line-height: 1;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -478,7 +512,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.5);
   margin-top: 4px;
 }
@@ -498,10 +532,10 @@ html, body {
 .score-ring-num {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 22px;
-  font-weight: 600;
-  color: #ff6633;
+  font-weight: 700;
+  color: #F7772A;
   font-variant-numeric: tabular-nums;
 }
 
@@ -509,7 +543,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.5);
 }
 
@@ -524,6 +558,7 @@ html, body {
   padding: 11px 18px;
   background: rgba(3, 3, 8, 0.94);
   border: 1px solid rgba(255, 235, 180, 0.13);
+  border-radius: 10px;
   backdrop-filter: blur(24px);
 }
 
@@ -533,7 +568,7 @@ html, body {
   font-family: var(--font-copy);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: rgba(255, 235, 180, 0.88);
   margin-bottom: 5px;
 }
@@ -648,7 +683,7 @@ html, body {
   }
 
   .sky-cloud-icon { font-size: 10px; }
-  .sky-cloud-label { font-size: 9px; letter-spacing: 0.03em; }
+  .sky-cloud-label { font-size: 9px; letter-spacing: 0; }
 
   .sky-cloud-wrap { height: 44px; }
   .sky-cloud-svg  { height: 44px; }

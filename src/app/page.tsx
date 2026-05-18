@@ -655,30 +655,25 @@ function SkyPanel({
 
             {/* Cloud stroke */}
             <path d={strokePath} fill="none" stroke="rgba(190,210,255,0.30)" strokeWidth="0.5" />
-            {activeCloudSample && (
-              <>
-                <line
-                  className="sky-cloud-hover-guide"
-                  x1={activeCloudSample.x}
-                  y1="0"
-                  x2={activeCloudSample.x}
-                  y2={CLOUD_H}
-                />
-                <circle
-                  cx={activeCloudSample.x}
-                  cy={activeCloudSample.y}
-                  r="2.5"
-                  fill="rgba(190,210,255,0.18)"
-                />
-                <circle
-                  cx={activeCloudSample.x}
-                  cy={activeCloudSample.y}
-                  r="1.1"
-                  fill="rgba(255,235,180,0.92)"
-                />
-              </>
-            )}
           </svg>
+
+          {activeCloudSample && (
+            <>
+              <span
+                className="sky-cloud-hover-guide"
+                style={{ left: `${activeCloudSample.x}%` }}
+                aria-hidden="true"
+              />
+              <span
+                className="sky-cloud-hover-marker"
+                style={{
+                  left: `${activeCloudSample.x}%`,
+                  top: `${(activeCloudSample.y / CLOUD_H) * 100}%`,
+                }}
+                aria-hidden="true"
+              />
+            </>
+          )}
 
           {activeCloudSample && (
             <div
@@ -1738,7 +1733,7 @@ export default function OrreryPage() {
                   cy="40"
                   r="34"
                   fill="none"
-                  stroke="#ff6633"
+                  stroke="#F7772A"
                   strokeWidth="2"
                   strokeDasharray={ringCircumference}
                   strokeDashoffset={ringOffset}
