@@ -16,8 +16,8 @@ const sora = Sora({
 });
 
 export const metadata: Metadata = {
-  title: "ORRERY — Astronomy Events",
-  description: "Local astronomy event recommendations."
+  title: "Cosmic Weather",
+  description: "Local cosmic weather and astronomy event recommendations."
 };
 
 export const viewport: Viewport = {
