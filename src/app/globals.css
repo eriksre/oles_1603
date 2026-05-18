@@ -194,8 +194,39 @@ html, body {
   appearance: none;
 }
 
+.sky-cloud-hit.active {
+  background: linear-gradient(to bottom, rgba(255, 235, 180, 0.07), transparent 72%);
+}
+
 .sky-cloud-hit:focus-visible {
   outline: none;
+}
+
+.sky-cloud-demarcation {
+  stroke: rgba(255, 235, 180, 0.26);
+  stroke-width: 0.8;
+  stroke-dasharray: 1.2 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.sky-cloud-hover-guide {
+  stroke: rgba(255, 235, 180, 0.34);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.sky-cloud-100-label {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  z-index: 2;
+  font-family: var(--font-copy);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 235, 180, 0.42);
+  pointer-events: none;
 }
 
 .sky-cloud-tooltip {
@@ -456,7 +487,7 @@ html, body {
   margin-top: 24px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
 }
 
@@ -579,6 +610,7 @@ html, body {
   }
 
   .eyebrow {
+    flex: 0 0 100%;
     margin-bottom: 10px;
     font-size: 10px;
   }
@@ -638,9 +670,19 @@ html, body {
   .direction-data {
     margin-bottom: 0;
     text-align: center;
+    min-height: 75px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
   }
 
-  .dir-value { font-size: 22px; }
+  .dir-value {
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+  }
   .dir-label { font-size: 9px; }
 
   .score-ring-wrap {

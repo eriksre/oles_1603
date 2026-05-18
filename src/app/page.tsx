@@ -645,10 +645,25 @@ function SkyPanel({
             {/* Cloud fill */}
             <path d={fillPath} fill="url(#sky-cloud-grad)" />
 
+            <line
+              className="sky-cloud-demarcation"
+              x1="0"
+              y1="0.5"
+              x2="100"
+              y2="0.5"
+            />
+
             {/* Cloud stroke */}
             <path d={strokePath} fill="none" stroke="rgba(190,210,255,0.30)" strokeWidth="0.5" />
             {activeCloudSample && (
               <>
+                <line
+                  className="sky-cloud-hover-guide"
+                  x1={activeCloudSample.x}
+                  y1="0"
+                  x2={activeCloudSample.x}
+                  y2={CLOUD_H}
+                />
                 <circle
                   cx={activeCloudSample.x}
                   cy={activeCloudSample.y}
@@ -680,11 +695,13 @@ function SkyPanel({
             </div>
           )}
 
+          <span className="sky-cloud-100-label" aria-hidden="true">100%</span>
+
           <div className="sky-cloud-hit-area">
             {cloudHoverTargets.map((sample, index) => (
               <button
                 key={sample.timeUtc}
-                className="sky-cloud-hit"
+                className={`sky-cloud-hit${index === activeCloudIndex ? ' active' : ''}`}
                 style={{
                   left: `${sample.left}%`,
                   width: `${sample.width}%`,
