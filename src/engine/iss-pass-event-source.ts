@@ -16,6 +16,7 @@ import type { AstronomyEventCandidate } from "../domain/events.js";
 import type { ObserverContext, TimeRange } from "../domain/observer.js";
 import type { AstronomyEventSource } from "./contracts.js";
 import { azimuthToDirectionLabel, normalizeDegrees } from "../utils/direction.js";
+import { formatLocalDateTime, formatLocalTime } from "../utils/format-datetime.js";
 import { getLocalSkyContext } from "../utils/observer-sky.js";
 import {
   MINUTE_MS,
@@ -195,7 +196,8 @@ function passToEvent(
   pass: ActivePass,
   objectName: string,
   minPeakElevationDeg: number,
-  minDurationSeconds: number
+  minDurationSeconds: number,
+  observer: ObserverContext
 ): AstronomyEventCandidate | undefined {
   const start = pass.samples[0];
   const end = pass.samples[pass.samples.length - 1];
@@ -242,7 +244,13 @@ function passToEvent(
     localBestViewingSunAltitudeDeg: peak.sunAltitudeDeg,
     localBestViewingMoonAltitudeDeg: peak.moonAltitudeDeg,
     localBestViewingMoonIllumination: peak.moonIllumination,
-    instructionText: `From ${start.time.toISOString()} to ${end.time.toISOString()}, watch for the ISS moving from ${startDirection} to ${endDirection}; it peaks toward ${peakDirection}.`
+    instructionText: `From ${formatLocalDateTime(
+      start.time,
+      observer.timezoneOffsetMinutes
+    )} to ${formatLocalTime(
+      end.time,
+      observer.timezoneOffsetMinutes
+    )}, watch for the ISS moving from ${startDirection} to ${endDirection}; it peaks toward ${peakDirection}.`
   };
 }
 
@@ -379,7 +387,8 @@ export class IssPassEventSource implements AstronomyEventSource {
           pass,
           elements.objectName,
           this.minPeakElevationDeg,
-          this.minDurationSeconds
+          this.minDurationSeconds,
+          observer
         );
 
         return event ? [event] : [];

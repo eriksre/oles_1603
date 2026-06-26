@@ -3,6 +3,7 @@ import type * as AstronomyEngine from "astronomy-engine";
 
 import type { AstronomyEventCandidate } from "../domain/events.js";
 import type { ObserverContext, TimeRange } from "../domain/observer.js";
+import { formatLocalDateTime } from "../utils/format-datetime.js";
 import type { AstronomyEventSource } from "./contracts.js";
 import {
   type MeteorShowerCatalogEntry,
@@ -180,7 +181,10 @@ function addLocalBestViewing(
     localBestViewingSunAltitudeDeg: best.geometry.sunAltitudeDeg,
     localBestViewingMoonAltitudeDeg: best.geometry.moonAltitudeDeg,
     localBestViewingMoonIllumination: best.geometry.moonIllumination,
-    instructionText: `At ${best.time.toISOString()}, face ${best.geometry.targetDirectionLabel} and look ${Math.max(
+    instructionText: `At ${formatLocalDateTime(
+      best.time,
+      observer.timezoneOffsetMinutes
+    )}, face ${best.geometry.targetDirectionLabel} and look ${Math.max(
       0,
       Math.round(best.geometry.targetAltitudeDeg)
     )} degrees above the horizon.`
