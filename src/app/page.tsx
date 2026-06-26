@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import * as THREE from 'three';
 
 interface Star {
@@ -129,6 +129,22 @@ const recommendationCache = new Map<string, RecommendationResponse>();
 const recommendationRequests = new Map<string, Promise<RecommendationResponse>>();
 let initialLocationRequest: Promise<RecommendationLocation> | undefined;
 
+class LocationPermissionError extends Error {
+  public readonly denied: boolean;
+
+  public constructor(message: string, denied: boolean) {
+    super(message);
+    this.name = 'LocationPermissionError';
+    this.denied = denied;
+  }
+}
+
+// Drop the cached location request so a user-triggered retry re-prompts the
+// browser instead of replaying the previous (possibly rejected) promise.
+function resetInitialLocationRequest() {
+  initialLocationRequest = undefined;
+}
+
 interface RecommendationLocation {
   latitude: number;
   longitude: number;
@@ -208,7 +224,9 @@ function resolveInitialLocation(): Promise<RecommendationLocation> {
   }
 
   if (!navigator.geolocation) {
-    return Promise.reject(new Error('Location access is required to load events for your current sky.'));
+    return Promise.reject(
+      new LocationPermissionError('Location access is required to load events for your current sky.', true)
+    );
   }
 
   initialLocationRequest = new Promise((resolve, reject) => {
@@ -221,11 +239,13 @@ function resolveInitialLocation(): Promise<RecommendationLocation> {
         });
       },
       (error) => {
+        const denied = error.code === error.PERMISSION_DENIED;
         reject(
-          new Error(
-            error.code === error.PERMISSION_DENIED
+          new LocationPermissionError(
+            denied
               ? 'Location permission is required to load events for your current sky.'
-              : 'Unable to determine your current location.'
+              : 'Unable to determine your current location.',
+            denied
           )
         );
       },
@@ -804,9 +824,16 @@ export default function OrreryPage() {
   const [locationLabel, setLocationLabel] = useState('Current location');
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [needsLocation, setNeedsLocation] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [, startTransition] = useTransition();
   const latestRequestId = useRef(0);
+  const cancelledRef = useRef(false);
+  const selectedIndexRef = useRef(0);
+
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
 
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date());
@@ -826,17 +853,12 @@ export default function OrreryPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRecommendations(location: {
-      latitude: number;
-      longitude: number;
-      label: string;
-    }) {
+  const loadRecommendations = useCallback(
+    async (location: { latitude: number; longitude: number; label: string }) => {
       const requestId = ++latestRequestId.current;
       setIsLoading(true);
       setQueryError(null);
+      setNeedsLocation(false);
 
       try {
         const payload = await fetchRecommendations({
@@ -847,7 +869,7 @@ export default function OrreryPage() {
           maxResults: 8,
         });
 
-        if (cancelled || requestId !== latestRequestId.current) {
+        if (cancelledRef.current || requestId !== latestRequestId.current) {
           return;
         }
 
@@ -855,7 +877,7 @@ export default function OrreryPage() {
         const sortedEvents = sortEventsByOccurrence(payload.events);
         startTransition(() => {
           setEvents((previousEvents) => {
-            const previousSelectedId = previousEvents[selectedIndex]?.id;
+            const previousSelectedId = previousEvents[selectedIndexRef.current]?.id;
             const nextSelectedIndex = previousSelectedId
               ? sortedEvents.findIndex((event) => event.id === previousSelectedId)
               : -1;
@@ -869,7 +891,7 @@ export default function OrreryPage() {
           setIsLoading(false);
         });
       } catch (error) {
-        if (cancelled || requestId !== latestRequestId.current) {
+        if (cancelledRef.current || requestId !== latestRequestId.current) {
           return;
         }
 
@@ -881,20 +903,33 @@ export default function OrreryPage() {
         setLocationLabel(location.label);
         setIsLoading(false);
       }
-    }
+    },
+    [startTransition]
+  );
+
+  const requestLocation = useCallback(() => {
+    // Forget any prior (possibly rejected) geolocation promise so the browser
+    // is asked again.
+    resetInitialLocationRequest();
+    setIsLoading(true);
+    setQueryError(null);
+    setNeedsLocation(false);
 
     void resolveInitialLocation()
       .then((location) => {
-        if (!cancelled) {
+        if (!cancelledRef.current) {
           void loadRecommendations(location);
         }
       })
       .catch((error) => {
-        if (cancelled) {
+        if (cancelledRef.current) {
           return;
         }
 
         setQueryError(error instanceof Error ? error.message : 'Unable to determine your current location.');
+        // Any failure to resolve location is recoverable by the user granting
+        // access and retrying, so surface the call-to-action button.
+        setNeedsLocation(true);
         setEvents([]);
         setForecastHours([]);
         setSolarTransitions([]);
@@ -902,11 +937,16 @@ export default function OrreryPage() {
         setLocationLabel('Current location');
         setIsLoading(false);
       });
+  }, [loadRecommendations]);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    requestLocation();
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, []);
+  }, [requestLocation]);
 
   useEffect(() => {
     // ─── Background (stars + nebulae, 2D canvas) ──────────────────────────────
@@ -1681,7 +1721,6 @@ export default function OrreryPage() {
   return (
     <>
       <canvas id="bg" />
-      <canvas id="orrery-canvas" />
 
       <div className="scene">
         <div className="info-left fade-in-2">
@@ -1693,6 +1732,16 @@ export default function OrreryPage() {
           <p className="desc">
             {eventDescription}
           </p>
+          {needsLocation ? (
+            <button
+              type="button"
+              className="location-cta"
+              onClick={requestLocation}
+              disabled={isLoading}
+            >
+              {isLoading ? 'Requesting location…' : 'Enable location access'}
+            </button>
+          ) : null}
           <div className="time-range-block">
             <div className="time-block">
               <div className="time-value">{startBoundary.value}</div>
@@ -1705,6 +1754,8 @@ export default function OrreryPage() {
           </div>
           <div className="divider-short" />
         </div>
+
+        <canvas id="orrery-canvas" />
 
         <div className="info-right fade-in-3">
           <div className="eyebrow">Where to look</div>
