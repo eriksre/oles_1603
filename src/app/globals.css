@@ -660,11 +660,22 @@ html, body {
     margin-bottom: 10px;
   }
 
-  /* Description and the desktop countdown block are pure decoration on
-   * mobile — the direction/score row below the orrery carries the useful
-   * information, and hiding these keeps the headline from crowding the
-   * orrery area. */
-  .desc,
+  /* Show the event description on mobile — it's the core "what is this"
+   * copy and was previously hidden entirely. Clamp it to a few lines and
+   * tighten the type so a long description can never grow down into the
+   * orrery. The desktop countdown block and decorative divider stay hidden
+   * to keep the top band compact. */
+  .desc {
+    font-size: 13px;
+    line-height: 1.55;
+    margin-bottom: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+  }
+
   .info-left .time-range-block,
   .info-left .divider-short {
     display: none;
@@ -735,6 +746,14 @@ html, body {
 }
 
 @media (max-width: 420px) {
+  /* Tighter vertical budget on small phones — clamp the description to
+   * three lines so it stays clear of the orrery. */
+  .desc {
+    font-size: 12px;
+    margin-bottom: 0;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
   .info-right { gap: 14px; bottom: 190px; }
   .dir-value { font-size: 20px; }
   .score-ring { width: 56px; height: 56px; }
