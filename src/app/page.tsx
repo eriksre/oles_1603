@@ -128,6 +128,12 @@ interface RecommendationResponse {
 const recommendationCache = new Map<string, RecommendationResponse>();
 const recommendationRequests = new Map<string, Promise<RecommendationResponse>>();
 let initialLocationRequest: Promise<RecommendationLocation> | undefined;
+const LOCATION_REQUIRED_MESSAGE =
+  'Cosmic weather needs to know your location to show you what will be in the sky next.';
+
+function resetInitialLocationRequest() {
+  initialLocationRequest = undefined;
+}
 
 interface RecommendationLocation {
   latitude: number;
@@ -208,7 +214,7 @@ function resolveInitialLocation(): Promise<RecommendationLocation> {
   }
 
   if (!navigator.geolocation) {
-    return Promise.reject(new Error('Location access is required to load events for your current sky.'));
+    return Promise.reject(new Error(LOCATION_REQUIRED_MESSAGE));
   }
 
   initialLocationRequest = new Promise((resolve, reject) => {
@@ -220,14 +226,8 @@ function resolveInitialLocation(): Promise<RecommendationLocation> {
           label: 'Current location',
         });
       },
-      (error) => {
-        reject(
-          new Error(
-            error.code === error.PERMISSION_DENIED
-              ? 'Location permission is required to load events for your current sky.'
-              : 'Unable to determine your current location.'
-          )
-        );
+      () => {
+        reject(new Error(LOCATION_REQUIRED_MESSAGE));
       },
       {
         enableHighAccuracy: false,
@@ -804,6 +804,8 @@ export default function OrreryPage() {
   const [locationLabel, setLocationLabel] = useState('Current location');
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [needsLocation, setNeedsLocation] = useState(false);
+  const [locationRequestNonce, setLocationRequestNonce] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [, startTransition] = useTransition();
   const latestRequestId = useRef(0);
@@ -837,6 +839,7 @@ export default function OrreryPage() {
       const requestId = ++latestRequestId.current;
       setIsLoading(true);
       setQueryError(null);
+      setNeedsLocation(false);
 
       try {
         const payload = await fetchRecommendations({
@@ -874,6 +877,7 @@ export default function OrreryPage() {
         }
 
         setQueryError(error instanceof Error ? error.message : 'Unable to load events.');
+        setNeedsLocation(false);
         setEvents([]);
         setForecastHours([]);
         setSolarTransitions([]);
@@ -882,6 +886,11 @@ export default function OrreryPage() {
         setIsLoading(false);
       }
     }
+
+    resetInitialLocationRequest();
+    setIsLoading(true);
+    setQueryError(null);
+    setNeedsLocation(false);
 
     void resolveInitialLocation()
       .then((location) => {
@@ -894,7 +903,10 @@ export default function OrreryPage() {
           return;
         }
 
-        setQueryError(error instanceof Error ? error.message : 'Unable to determine your current location.');
+        setQueryError(error instanceof Error ? error.message : LOCATION_REQUIRED_MESSAGE);
+        // Any failure to resolve location is recoverable by the user granting
+        // access and retrying, so surface the call-to-action button.
+        setNeedsLocation(true);
         setEvents([]);
         setForecastHours([]);
         setSolarTransitions([]);
@@ -906,7 +918,7 @@ export default function OrreryPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locationRequestNonce, startTransition]);
 
   useEffect(() => {
     // ─── Background (stars + nebulae, 2D canvas) ──────────────────────────────
@@ -1664,9 +1676,11 @@ export default function OrreryPage() {
   const title = titleLines(selectedEvent?.title ?? (isLoading ? 'Searching sky' : 'Quiet sky'));
   const startBoundary = formatBoundary(selectedEvent, 'start');
   const endBoundary = formatBoundary(selectedEvent, 'end');
-  const eventDescription = queryError
-    ? queryError
-    : selectedEvent?.displayDescription ?? selectedEvent?.description ?? 'Scanning the next 7 days for visible events.';
+  const fallbackDescription =
+    selectedEvent?.displayDescription ?? selectedEvent?.description ?? 'Scanning the next 7 days for visible events.';
+  const eventDescription = needsLocation
+    ? LOCATION_REQUIRED_MESSAGE
+    : queryError ?? fallbackDescription;
   const directionLabel =
     selectedEvent?.localBestViewingDirectionLabel ??
     selectedEvent?.targetDirectionLabel ??
@@ -1693,6 +1707,16 @@ export default function OrreryPage() {
           <p className="desc">
             {eventDescription}
           </p>
+          {needsLocation ? (
+            <button
+              type="button"
+              className="location-cta"
+              onClick={() => setLocationRequestNonce((value) => value + 1)}
+              disabled={isLoading}
+            >
+              {isLoading ? 'Requesting location...' : 'Grant location permission'}
+            </button>
+          ) : null}
           <div className="time-range-block">
             <div className="time-block">
               <div className="time-value">{startBoundary.value}</div>

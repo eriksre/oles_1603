@@ -108,6 +108,45 @@ html, body {
   margin-bottom: 32px;
 }
 
+/* Call-to-action shown when location access is unavailable so the user can
+ * grant permission and reload without refreshing the page. */
+.location-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 32px;
+  padding: 11px 22px;
+  font-family: var(--font-copy);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #F7772A;
+  background: rgba(255, 60, 0, 0.12);
+  border: 1px solid rgba(255, 100, 48, 0.55);
+  border-radius: 999px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease,
+    transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.location-cta:hover:not(:disabled) {
+  background: rgba(255, 60, 0, 0.2);
+  border-color: rgba(255, 100, 48, 0.8);
+}
+
+.location-cta:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.location-cta:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ─── Unified sky panel ───────────────────────────────────────────────────────────── */
 .sky-panel {
   position: fixed;
