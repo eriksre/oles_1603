@@ -1,4 +1,4 @@
-# OLES1603
+# cosmic_weather
 
 Local app commands:
 

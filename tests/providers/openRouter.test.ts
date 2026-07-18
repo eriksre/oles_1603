@@ -21,7 +21,7 @@ describe("OpenRouterClient", () => {
       apiKey: "test-key",
       model: "openai/gpt-5.4-mini",
       appUrl: "https://example.com",
-      appTitle: "OLES1603",
+      appTitle: "cosmic_weather",
       fetchImpl: async (url, init) => {
         requests.push({ url, init });
 
@@ -61,7 +61,7 @@ describe("OpenRouterClient", () => {
     expect(requests[0]?.init?.headers).toMatchObject({
       Authorization: "Bearer test-key",
       "HTTP-Referer": "https://example.com",
-      "X-OpenRouter-Title": "OLES1603",
+      "X-OpenRouter-Title": "cosmic_weather",
       "Content-Type": "application/json"
     });
     expect(JSON.parse(requests[0]?.init?.body ?? "{}")).toMatchObject({
