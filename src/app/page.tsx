@@ -1695,7 +1695,6 @@ export default function OrreryPage() {
   return (
     <>
       <canvas id="bg" />
-      <canvas id="orrery-canvas" />
 
       <div className="scene">
         <div className="info-left fade-in-2">
@@ -1728,6 +1727,10 @@ export default function OrreryPage() {
             </div>
           </div>
           <div className="divider-short" />
+        </div>
+
+        <div className="orrery-slot">
+          <canvas id="orrery-canvas" />
         </div>
 
         <div className="info-right fade-in-3">
@@ -1770,18 +1773,18 @@ export default function OrreryPage() {
             <div className="score-ring-label">Cool score</div>
           </div>
         </div>
-      </div>
 
-      <SkyPanel
-        forecastHours={forecastHours}
-        events={events}
-        solarTransitions={solarTransitions}
-        selectedEvent={selectedEvent}
-        onSelectEvent={(event) => {
-          const idx = events.findIndex(e => e.id === event.id);
-          if (idx >= 0) setSelectedIndex(idx);
-        }}
-      />
+        <SkyPanel
+          forecastHours={forecastHours}
+          events={events}
+          solarTransitions={solarTransitions}
+          selectedEvent={selectedEvent}
+          onSelectEvent={(event) => {
+            const idx = events.findIndex(e => e.id === event.id);
+            if (idx >= 0) setSelectedIndex(idx);
+          }}
+        />
+      </div>
 
       <div id="planet-tooltip">
         <div className="tt-name" id="tt-name" />
