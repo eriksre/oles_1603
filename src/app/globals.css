@@ -104,6 +104,7 @@ html, body {
   font-size: 15px;
   font-weight: 400;
   line-height: 1.72;
+  text-wrap: pretty;
   color: rgba(255, 235, 180, 0.64);
   margin-bottom: 32px;
 }
@@ -699,14 +700,30 @@ html, body {
     margin-bottom: 10px;
   }
 
-  /* Description and the desktop countdown block are pure decoration on
-   * mobile — the direction/score row below the orrery carries the useful
-   * information, and hiding these keeps the headline from crowding the
-   * orrery area. */
-  .desc,
+  /* Keep the event narration available on phones. Generated descriptions are
+   * normally two short sentences; a bounded scroll area protects unusually
+   * long fallback/error copy from colliding with the orrery. */
+  .desc {
+    max-width: 520px;
+    max-height: clamp(54px, 12dvh, 104px);
+    margin: 0 auto 14px;
+    padding: 0 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    font-size: clamp(12px, 3.2vw, 14px);
+    line-height: 1.5;
+    color: rgba(255, 235, 180, 0.7);
+  }
+
   .info-left .time-range-block,
   .info-left .divider-short {
     display: none;
+  }
+
+  .location-cta {
+    margin-bottom: 16px;
   }
 
   .sky-panel-inner {
